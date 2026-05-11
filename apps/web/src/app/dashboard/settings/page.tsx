@@ -227,7 +227,7 @@ export default function SettingsPage() {
           <div>
             <h2 className="heading-3">MCP Integrations</h2>
             <p className="text-sm text-fg-3">
-              Connect tools your AI team uses as live actions — Canva, Figma, and more.
+              Connect tools your AI team uses as live actions — Gmail, Notion, Asana, social posting, and more.
             </p>
           </div>
         </div>
