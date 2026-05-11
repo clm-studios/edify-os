@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { Info, MessageCircle } from "lucide-react";
@@ -476,20 +476,38 @@ export default function DashboardHome() {
       .finally(() => setTokenUsageLoading(false));
   }, []);
 
-  const now = useMemo(() => new Date(), []);
-  const dayName = now.toLocaleDateString("en-US", { weekday: "long" });
-  const monthDay = now.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  const week = `WEEK ${Math.ceil(
-    ((now.getTime() - new Date(now.getFullYear(), 0, 1).getTime()) / 86_400_000 + 1) / 7,
-  )}`;
-  const clock = now.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-  const hour = now.getHours();
+  // Render time-based content client-side only to avoid SSR/CSR hydration
+  // mismatch (server UTC vs client local can differ on day/hour/week boundary).
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => {
+    setNow(new Date());
+    const interval = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const dayName = now?.toLocaleDateString("en-US", { weekday: "long" }) ?? "";
+  const monthDay =
+    now?.toLocaleDateString("en-US", { month: "short", day: "numeric" }) ?? "";
+  const week = now
+    ? `WEEK ${Math.ceil(
+        ((now.getTime() - new Date(now.getFullYear(), 0, 1).getTime()) / 86_400_000 + 1) / 7,
+      )}`
+    : "";
+  const clock =
+    now?.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }) ?? "";
+  const hour = now?.getHours() ?? null;
   const greeting =
-    hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+    hour === null
+      ? "Hello"
+      : hour < 12
+      ? "Good morning"
+      : hour < 18
+      ? "Good afternoon"
+      : "Good evening";
 
   const otherDirectors = ARCHETYPE_LIST;
 
