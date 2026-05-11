@@ -25,6 +25,16 @@ import {
   resolveRenderDimensions,
   sanitizePngFilename,
 } from "@/lib/render/og";
+import { withTimeout } from "@/lib/with-timeout";
+
+/**
+ * Hard ceiling on the render+upload pipeline. Vercel Hobby gives us 60s per
+ * function invocation; rendering rarely takes more than 8-15s, but Satori
+ * has a long tail when fonts or remote images stall. 45s leaves the chat
+ * route ~15s of slack for surrounding tool-loop work before the function
+ * times out hard.
+ */
+const RENDER_BUDGET_MS = 45_000;
 
 /** Supabase Storage bucket for rendered PNGs. Created by migration 00026. */
 export const RENDERED_FILES_BUCKET = "rendered-files";
@@ -202,29 +212,48 @@ export async function executeRenderTool({
     typeof input.filename === "string" ? input.filename : undefined
   );
 
-  let pngBuffer: Buffer;
-  try {
-    pngBuffer = await renderHtmlToPng({ html: htmlInput, width, height });
-  } catch (err) {
-    console.error("[render-tool] render failed", err);
-    const msg = err instanceof Error ? err.message : "render failed";
-    return { content: `Render failed: ${msg}`, is_error: true };
-  }
+  // Run render+upload as one unit with a single budget so the meta-tool can't
+  // hang the chat function past Vercel Hobby's 60s ceiling. Wrap in a
+  // discriminated union so the caller switches on `ok` rather than checking
+  // instanceof Error or comparing to a sentinel.
+  type RenderOutcome =
+    | { ok: true; pngBuffer: Buffer; renderId: string; downloadUrl: string }
+    | { ok: false; reason: "timeout" | "failed"; message: string };
 
-  let renderId: string;
-  let downloadUrl: string;
-  try {
-    ({ renderId, downloadUrl } = await persistRenderedPng({
-      serviceClient,
-      orgId,
-      pngBuffer,
-      filename,
-    }));
-  } catch (err) {
-    console.error("[render-tool] Supabase Storage upload failed", err);
-    const msg = err instanceof Error ? err.message : "upload failed";
-    return { content: `PNG generated but upload failed: ${msg}`, is_error: true };
+  const outcome = await withTimeout<RenderOutcome>(
+    (async (): Promise<RenderOutcome> => {
+      try {
+        const pngBuffer = await renderHtmlToPng({ html: htmlInput, width, height });
+        const persisted = await persistRenderedPng({
+          serviceClient,
+          orgId,
+          pngBuffer,
+          filename,
+        });
+        return { ok: true, pngBuffer, ...persisted };
+      } catch (err) {
+        console.error("[render-tool] render or upload failed", err);
+        return {
+          ok: false,
+          reason: "failed",
+          message: err instanceof Error ? err.message : "render failed",
+        };
+      }
+    })(),
+    RENDER_BUDGET_MS,
+    {
+      ok: false,
+      reason: "timeout",
+      message:
+        "Render timed out after 45s. Try simpler HTML (fewer remote images, fewer nested flex containers) or smaller dimensions.",
+    },
+  );
+
+  if (!outcome.ok) {
+    const prefix = outcome.reason === "timeout" ? "" : "Render failed: ";
+    return { content: `${prefix}${outcome.message}`, is_error: true };
   }
+  const { pngBuffer, renderId, downloadUrl } = outcome;
 
   const summary = {
     renderId,

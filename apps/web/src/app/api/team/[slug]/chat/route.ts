@@ -134,15 +134,45 @@ export async function POST(
     content: message,
   });
 
+  // Pre-insert the assistant message row with status='streaming'. The
+  // try/catch/finally below updates it to 'complete' on success or 'errored'
+  // if the stream is aborted. The frontend reads this status on rehydrate to
+  // decide between loading dots vs. a retry affordance.
+  const timestamp = new Date().toISOString();
+  const { data: assistantRow, error: assistantInsertError } = await serviceClient
+    .from("messages")
+    .insert({
+      conversation_id: activeConversationId,
+      role: "assistant",
+      content: "",
+      status: "streaming",
+    })
+    .select("id")
+    .single();
+  if (assistantInsertError || !assistantRow) {
+    console.error(
+      "[team/chat] Failed to pre-insert assistant row:",
+      assistantInsertError,
+    );
+    return NextResponse.json(
+      { error: "Failed to start assistant turn" },
+      { status: 500 },
+    );
+  }
+  const msgId = assistantRow.id as string;
+
   // Stream the response in real-time — text deltas from Claude are pushed to
   // the browser as SSE events the moment they arrive. DB persistence and
   // side-effects (notifications, tasks, memory) happen after completion.
-  const msgId = crypto.randomUUID();
-  const timestamp = new Date().toISOString();
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
     async start(controller) {
+      // streamErrored: set true if anything below throws or the request is
+      // aborted. The finally block reads this to decide which terminal status
+      // lands on the assistant row.
+      let streamErrored = false;
+      let finalText = "";
       try {
         // Send preliminary meta event so the frontend knows the conversationId
         // and can render the message shell immediately.
@@ -169,12 +199,16 @@ export async function POST(
           history,
           customArchetypeName,
           onTextDelta: (text) => {
+            // Accumulate partial text so the finally block can persist
+            // whatever made it through if the stream is aborted mid-flight.
+            finalText += text;
             const delta = JSON.stringify({ type: "delta", text });
             controller.enqueue(encoder.encode(`data: ${delta}\n\n`));
           },
         });
 
         const { text, generatedFiles, tokenUsage } = result;
+        finalText = text;
 
         // Send done event with files (if any)
         const done = JSON.stringify({
@@ -186,25 +220,29 @@ export async function POST(
 
         // --- Post-stream side-effects (fire-and-forget) ---
 
-        // Persist assistant message + update conversation timestamp
+        // Update the pre-inserted assistant row with final content + complete
+        // status. UPDATE (not INSERT) — the row was created up-front so that
+        // a mid-stream timeout can land 'errored' on the same row.
         await Promise.all([
-          serviceClient.from("messages").insert({
-            conversation_id: activeConversationId,
-            role: "assistant",
-            content: text,
-            ...(tokenUsage
-              ? {
-                  metadata: {
-                    token_usage: {
-                      input_tokens: tokenUsage.inputTokens,
-                      output_tokens: tokenUsage.outputTokens,
-                      cache_read_tokens: tokenUsage.cacheReadTokens,
-                      cache_creation_tokens: tokenUsage.cacheCreationTokens,
+          serviceClient
+            .from("messages")
+            .update({
+              content: text,
+              status: "complete",
+              ...(tokenUsage
+                ? {
+                    metadata: {
+                      token_usage: {
+                        input_tokens: tokenUsage.inputTokens,
+                        output_tokens: tokenUsage.outputTokens,
+                        cache_read_tokens: tokenUsage.cacheReadTokens,
+                        cache_creation_tokens: tokenUsage.cacheCreationTokens,
+                      },
                     },
-                  },
-                }
-              : {}),
-          }),
+                  }
+                : {}),
+            })
+            .eq("id", msgId),
           serviceClient
             .from("conversations")
             .update({ updated_at: new Date().toISOString() })
@@ -243,6 +281,7 @@ export async function POST(
           userMessage: message,
         });
       } catch (err) {
+        streamErrored = true;
         console.error("[team/chat] Streaming error:", err);
         const errMsg = err instanceof Error ? err.message : "Claude API error";
         try {
@@ -250,6 +289,28 @@ export async function POST(
           controller.enqueue(encoder.encode(`data: ${errEvent}\n\n`));
         } catch { /* controller may already be closed */ }
         try { controller.close(); } catch { /* ignore */ }
+      } finally {
+        // Anchor the assistant row's terminal state. On success the try block
+        // already set status='complete'; this only fires DB work when the
+        // stream errored (timeout, throw, client abort), and writes back
+        // whatever partial text we managed to accumulate so the user can see
+        // how far the assistant got.
+        if (streamErrored) {
+          try {
+            await serviceClient
+              .from("messages")
+              .update({
+                content: finalText,
+                status: "errored",
+              })
+              .eq("id", msgId);
+          } catch (dbErr) {
+            console.error(
+              "[team/chat] Failed to mark assistant row errored:",
+              dbErr,
+            );
+          }
+        }
       }
     },
   });
