@@ -157,3 +157,122 @@ migration — they're all app-side. The migration just unlocks the cross-mount
 
 - `pnpm typecheck` — passes (4/4 packages green).
 - No lint script exists in `apps/web/package.json`; relied on TS strictness.
+
+---
+
+# SESSION-LOG — Routing + Copy Cleanup Agent
+
+**Identity:** Routing + Copy Cleanup Agent (Sonnet)
+**Branch:** `lopmon/fix-routing-and-copy-cleanup`
+**Worktree:** `C:/Users/Araly/edify-os-routing-cleanup-20260511`
+**Date:** 2026-05-11
+**Task:** Bundle three small fixes from
+`smoke-test-findings-2026-05-11.md` (bugs 3, 4, 5).
+
+---
+
+## What shipped (2 of 3 fixes)
+
+### Fix 2 (Bug 4): `/dashboard/settings/integrations` redirect — SHIPPED
+
+**`apps/web/src/app/dashboard/settings/integrations/page.tsx`** (new, 9 lines
+incl. comments). Server component that calls `redirect('/dashboard/integrations')`
+from `next/navigation`. No client flash, no middleware change, no
+`next.config.mjs` edit. Catches the predictable-but-wrong URL users would
+type given the Settings card hierarchy.
+
+### Fix 3 (Bug 5): MCP Integrations card copy — SHIPPED
+
+**`apps/web/src/app/dashboard/settings/page.tsx`** (1-line change, line 230).
+Old: `"Connect tools your AI team uses as live actions — Canva, Figma, and more."`
+New: `"Connect tools your AI team uses as live actions — Gmail, Notion, Asana, social posting, and more."`
+
+Reflects the actual current pipeline (Composio for Gmail / social posting,
+direct MCP for Notion / Asana / Zapier, HTML+CSS via `@vercel/og` for
+design output). Drops Canva (deprecated per Sprint 2 WOW) and Figma
+(deferred — handoff tool not output tool). Grepped the repo for
+`"Canva, Figma"` and `"Canva and Figma"` — no other stale references.
+
+---
+
+## NOT shipped — Fix 1 (Bug 3): Knowledge Base sidebar link
+
+**Decision: paused and surfaced to Lopmon. Did NOT modify the sidebar.**
+
+**Why:** the PRD's premise about Bug 3 does not match the code on this
+branch. The PRD says:
+
+> "The sidebar has a 'Knowledge Base' nav item that links to
+> `/dashboard/knowledge`. That route doesn't exist and returns a 404."
+
+In `apps/web/src/components/sidebar.tsx` (line 41 on this branch and on
+the production commit `163cfab` that the smoke test ran against), the
+"Knowledge Base" entry actually links to **`/dashboard/memory`**, not
+`/dashboard/knowledge`:
+
+```ts
+{ href: '/dashboard/memory', label: 'Knowledge Base', icon: Brain },
+```
+
+`/dashboard/memory/page.tsx` exists, ships a full Memory entries CRUD
+surface (categories: mission / programs / donors / grants / campaigns /
+brand_voice / contacts / processes / general / financials / volunteers /
+events), and renders cleanly. Backed by `/api/memory/entries`.
+
+So clicking the sidebar item from production routes to a working page.
+Minervamon's smoke test reported `/dashboard/knowledge → 404` — that's
+real, but it's not because the sidebar links there. The most likely
+explanation is that she URL-typed `/dashboard/knowledge` based on the
+sidebar label "Knowledge Base" without inspecting the underlying href,
+then concluded "Sidebar has 'Knowledge Base' nav item but the route
+doesn't exist." Her conclusion was wrong; the link is fine.
+
+**Two possible interpretations of the PRD's intent:**
+
+1. **Lopmon wanted the broken link fixed.** In this case there is
+   nothing to do — the link goes to a working route. Action: no change.
+2. **Lopmon wanted "Knowledge Base" gone regardless** because
+   `/dashboard/memory` is considered an inadequate placeholder and the
+   real surface should land via the Programs Director PRD
+   (`PRD-programs-director-knowledge-curation-2026-05-10.md`). In this
+   case, removing the link would break the in-product discovery path for
+   a working surface that orgs are presumably using to store mission /
+   programs / donor knowledge. That seems user-hostile.
+
+Without being able to ask, the conservative call is to **not** touch
+the sidebar and let Lopmon decide. If interpretation 2 is correct,
+Lopmon can ship the removal in a one-line follow-up.
+
+**If Lopmon wants interpretation 2, the one-line removal is:**
+
+In `apps/web/src/components/sidebar.tsx` around line 41, delete:
+
+```ts
+{ href: '/dashboard/memory', label: 'Knowledge Base', icon: Brain },
+```
+
+(And remove the now-unused `Brain` import on line 11. The `/dashboard/memory`
+route stub stays — only the nav link goes, matching the PRD spirit.)
+
+---
+
+## Files changed
+
+- `apps/web/src/app/dashboard/settings/integrations/page.tsx` (new)
+- `apps/web/src/app/dashboard/settings/page.tsx` (1-line copy update)
+
+---
+
+## Verification
+
+- `pnpm typecheck` — passes (4/4 packages green, web rebuilt with cache miss).
+- `/simplify` pass: diff is minimal (10 lines new + 1 line changed); no
+  dead imports, no leftover references. Grep for `"Canva, Figma"` /
+  `"Canva and Figma"` returned no other matches in the repo, so the copy
+  fix is the only place that staleness lived.
+
+---
+
+## PR
+
+To be filled after `gh pr create`.
