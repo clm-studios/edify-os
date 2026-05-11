@@ -22,6 +22,13 @@ export interface Message {
   isError?: boolean;
   /** The original user message text that can be retried on error. */
   failedMessageText?: string;
+  /**
+   * Server-side lifecycle (set by the chat route, surfaced by GET .../messages).
+   * 'errored' means the stream died before a clean done event — the UI should
+   * render a retry affordance instead of loading dots on rehydrate. Older
+   * rows from before migration 00036 default to 'complete'.
+   */
+  status?: "streaming" | "complete" | "errored";
 }
 
 export interface Conversation {

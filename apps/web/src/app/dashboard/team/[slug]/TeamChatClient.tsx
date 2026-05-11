@@ -28,6 +28,52 @@ import { SuggestionChip } from "@/components/ui";
 import type { EnabledAgentsMap } from "@/app/api/team/enabled/route";
 
 // ---------------------------------------------------------------------------
+// projectErroredMessages — convert server status='errored' assistant rows
+// into the existing error-card shape so the retry UI works on rehydrate.
+//
+// Pairs with migration 00036: the chat route now writes status='errored' to
+// the messages row when the stream dies before a clean done event (timeout,
+// abort, throw). On the next mount, the client sees that status and renders
+// the retry affordance instead of loading dots.
+// ---------------------------------------------------------------------------
+function projectErroredMessages(msgs: Message[]): Message[] {
+  return msgs.map((m, i) => {
+    if (m.role !== "assistant" || m.status !== "errored") return m;
+    // Find the most recent user message before this assistant turn — that's
+    // what a "Retry" click should re-send.
+    let originalText = "";
+    for (let j = i - 1; j >= 0; j--) {
+      if (msgs[j].role === "user") {
+        originalText = msgs[j].content;
+        break;
+      }
+    }
+    return {
+      ...m,
+      isError: true,
+      failedMessageText: originalText,
+      // Replace any empty/partial content with a clear message about what
+      // happened. If the server captured partial text, keep it so the user
+      // can see how far the assistant got.
+      content:
+        m.content && m.content.trim().length > 0
+          ? `${m.content}\n\n_Request timed out before completion. Retry?_`
+          : "Request timed out. Tap Retry to try again.",
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Stall-detection ceiling. If the SSE stream goes this long without a delta,
+// the client aborts and surfaces a "request timed out" error card. 90s is
+// generous enough that even the slowest legitimate tool chain (multi-step
+// grant matching) completes in time, but tight enough that a hung function
+// invocation doesn't leave the UI dead for the full 60s+ before Vercel kills
+// the connection.
+// ---------------------------------------------------------------------------
+const STREAM_STALL_TIMEOUT_MS = 90_000;
+
+// ---------------------------------------------------------------------------
 // useStreamBuffer — smooth character-by-character reveal of streamed text
 // ---------------------------------------------------------------------------
 function useStreamBuffer(isStreaming: boolean) {
@@ -302,10 +348,16 @@ export default function TeamChatClient({
       getMessagesFromServer(slug, convId)
         .then((serverMessages) => {
           if (serverMessages.length > 0) {
-            setMessages(serverMessages);
+            // Honor server-side message status: an assistant turn that died
+            // mid-stream (status='errored') gets projected onto the existing
+            // error-card shape so the user sees a retry button instead of
+            // perpetual loading dots on refresh. The "original text" used for
+            // retry is the most recent prior user message in the thread.
+            const projected = projectErroredMessages(serverMessages);
+            setMessages(projected);
             // Backfill localStorage so subsequent loads are instant
             localStorage.removeItem(`chat:messages:${convId}`);
-            for (const msg of serverMessages) {
+            for (const msg of projected) {
               saveMessage(convId, msg);
             }
           }
@@ -347,14 +399,33 @@ export default function TeamChatClient({
         conversationId: tempConvId,
       };
 
+      // Tracks whether the AbortController fire was due to a stall (vs unmount).
+      // The catch block reads this to decide between rendering a retry card
+      // and silently swallowing the abort.
+      let stallAborted = false;
       try {
         // Insert placeholder only after the user message is shown
         setMessages((prev) => [...prev, placeholderMsg]);
         setStreamingId(placeholderId);
 
-        // Create an AbortController so we can cancel the stream on unmount.
+        // Create an AbortController so we can cancel the stream on unmount
+        // OR when the server goes quiet for too long (see stallTimer below).
         const controller = new AbortController();
         abortControllerRef.current = controller;
+
+        // Stall-detection: reset a 90s timer on every chunk. If no chunk
+        // arrives in that window — e.g. Vercel killed the function past its
+        // maxDuration — we abort the fetch so the UI surfaces a retry card
+        // instead of sitting on loading dots forever.
+        let stallTimer: ReturnType<typeof setTimeout> | undefined;
+        const armStallTimer = () => {
+          if (stallTimer) clearTimeout(stallTimer);
+          stallTimer = setTimeout(() => {
+            stallAborted = true;
+            controller.abort();
+          }, STREAM_STALL_TIMEOUT_MS);
+        };
+        armStallTimer();
 
         const response = await apiSendMessage(
           slug,
@@ -362,12 +433,16 @@ export default function TeamChatClient({
           activeConversation?.id,
           // onDelta: feed chunk into the animation buffer instead of directly
           // updating message state — the RAF loop in useStreamBuffer reveals it
-          // character-by-character at ~180 chars/sec.
+          // character-by-character at ~180 chars/sec. Re-arm the stall timer
+          // on every chunk so a chatty stream stays alive indefinitely.
           (chunk: string) => {
+            armStallTimer();
             addChunk(chunk);
           },
           controller.signal
         );
+
+        if (stallTimer) clearTimeout(stallTimer);
 
         setStreamingId(null);
         resetStreamBuffer();
@@ -424,14 +499,26 @@ export default function TeamChatClient({
         setStreamingId(null);
         resetStreamBuffer();
         abortControllerRef.current = null;
-        // If aborted due to unmount, don't show an error — the cleanup effect handles it.
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        const rawMessage =
-          err instanceof Error ? err.message : String(err);
-        const friendlyContent = rawMessage.toLowerCase().includes("network") ||
-          rawMessage.toLowerCase().includes("failed to fetch")
-          ? `Chat failed: network error — check your connection and try again.`
-          : `Chat failed: ${rawMessage}`;
+        // Abort from the unmount cleanup effect is silent — but a stall-timer
+        // abort is a real failure the user needs to see (and retry).
+        if (
+          err instanceof DOMException &&
+          err.name === "AbortError" &&
+          !stallAborted
+        ) {
+          return;
+        }
+        const rawMessage = stallAborted
+          ? "the assistant stopped responding after 90s"
+          : err instanceof Error
+            ? err.message
+            : String(err);
+        const friendlyContent = stallAborted
+          ? `Request timed out — the assistant stopped responding. Tap Retry to try again.`
+          : rawMessage.toLowerCase().includes("network") ||
+              rawMessage.toLowerCase().includes("failed to fetch")
+            ? `Chat failed: network error — check your connection and try again.`
+            : `Chat failed: ${rawMessage}`;
         const errorMsg: Message = {
           id: crypto.randomUUID(),
           role: "assistant",

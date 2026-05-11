@@ -49,7 +49,7 @@ export async function GET(
 
   const { data: messages, error } = await serviceClient
     .from("messages")
-    .select("id, role, content, created_at")
+    .select("id, role, content, created_at, status")
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: true })
     .limit(100);
@@ -59,11 +59,16 @@ export async function GET(
     return NextResponse.json({ error: "Failed to fetch messages" }, { status: 500 });
   }
 
+  // Migration 00036 added messages.status; older rows have default 'complete'.
+  // Surface it to the client so the chat UI can render a retry affordance
+  // instead of perpetual loading dots when rehydrating an assistant turn that
+  // died mid-stream.
   const shaped = (messages ?? []).map((m) => ({
     id: m.id as string,
     role: m.role as "user" | "assistant",
     content: m.content as string,
     timestamp: m.created_at as string,
+    status: (m.status as "streaming" | "complete" | "errored" | null) ?? "complete",
     conversationId,
   }));
 

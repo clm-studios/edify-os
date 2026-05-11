@@ -2,6 +2,13 @@
   "installCommand": "cd ../.. && pnpm install",
   "buildCommand": "cd ../.. && pnpm --filter @edify/shared build && cd apps/web && npx next build",
   "framework": "nextjs",
+  "functions": {
+    "src/app/api/team/[slug]/chat/route.ts": { "maxDuration": 60 },
+    "src/app/api/decision-lab/route.ts": { "maxDuration": 60 },
+    "src/app/api/decision-lab/follow-up/route.ts": { "maxDuration": 60 },
+    "src/app/api/heartbeat/trigger/route.ts": { "maxDuration": 60 },
+    "src/app/api/briefing/generate/route.ts": { "maxDuration": 60 }
+  },
   "crons": [
     {
       "path": "/api/heartbeat/trigger",

@@ -29,6 +29,7 @@ import { searchGrants, fetchGrantDetails } from "@/lib/grants-gov";
 import { searchCaGrants } from "@/lib/ca-grants-portal";
 import { searchFederalRegister } from "@/lib/federal-register";
 import { getFoundationGrants } from "@/lib/foundation-grants";
+import { withTimeout } from "@/lib/with-timeout";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -175,6 +176,14 @@ const BLURB_MAX_CHARS = 400;
  *  default — the cached org-profile preamble means cost stays under a dollar
  *  per matching even for the 50-candidate ceiling. */
 const JUDGE_MODEL = "claude-sonnet-4-6";
+/**
+ * Per-source timeout. The meta-tool fans out to up to 9 sources in parallel;
+ * any single slow source short-circuits to an empty result so the judge can
+ * still rank whatever made it back in time. Tuned so total wall-clock budget
+ * fits comfortably under Vercel Hobby's 60s function ceiling even when every
+ * source happens to fire its timeout.
+ */
+const PER_SOURCE_TIMEOUT_MS = 8000;
 
 // ---------------------------------------------------------------------------
 // Aggregator — fans out to all sources in parallel, projects to RawCandidate
@@ -228,13 +237,21 @@ async function aggregateCandidates(
         // like "nonprofits" — we map that to the right code. When the user
         // passes an exact code (matches /^\d{2}$/), pass through verbatim.
         const eligibilities = mapEligibilityCodes(org.eligibility);
-        const result = await searchGrants({
-          keyword: keyword || undefined,
-          oppStatuses: ["forecasted", "posted"],
-          eligibilities,
-          deadlineWithinDays: opts.deadlineWithinDays,
-          rows: 30,
-        });
+        const result = await withTimeout(
+          searchGrants({
+            keyword: keyword || undefined,
+            oppStatuses: ["forecasted", "posted"],
+            eligibilities,
+            deadlineWithinDays: opts.deadlineWithinDays,
+            rows: 30,
+          }),
+          PER_SOURCE_TIMEOUT_MS,
+          null,
+          () => {
+            errors.push({ source: "grants.gov", message: "timeout" });
+          },
+        );
+        if (!result) return [];
         return result.grants.map(
           (g): RawCandidate => ({
             id: `grants_gov:${g.opportunityId}`,
@@ -272,11 +289,19 @@ async function aggregateCandidates(
       (async () => {
         sourcesUsed.push("ca_grants");
         try {
-          const result = await searchCaGrants({
-            query: keyword || undefined,
-            status: "active",
-            limit: 10,
-          });
+          const result = await withTimeout(
+            searchCaGrants({
+              query: keyword || undefined,
+              status: "active",
+              limit: 10,
+            }),
+            PER_SOURCE_TIMEOUT_MS,
+            null,
+            () => {
+              errors.push({ source: "ca_grants", message: "timeout" });
+            },
+          );
+          if (!result) return [];
           return result.grants.map((g): RawCandidate => {
             const { floor, ceiling } = parseLooseAmounts(g.estAmounts);
             return {
@@ -313,13 +338,21 @@ async function aggregateCandidates(
     (async () => {
       sourcesUsed.push("federal_register");
       try {
-        const result = await searchFederalRegister({
-          query: keyword || undefined,
-          documentType: "NOTICE",
-          publishedFrom: isoDate(ninetyDaysAgo),
-          publishedTo: isoDate(today),
-          limit: 15,
-        });
+        const result = await withTimeout(
+          searchFederalRegister({
+            query: keyword || undefined,
+            documentType: "NOTICE",
+            publishedFrom: isoDate(ninetyDaysAgo),
+            publishedTo: isoDate(today),
+            limit: 15,
+          }),
+          PER_SOURCE_TIMEOUT_MS,
+          null,
+          () => {
+            errors.push({ source: "federal_register", message: "timeout" });
+          },
+        );
+        if (!result) return [];
         // Federal Register doesn't expose deadline or amount — those live in
         // the NOFO PDF. We surface the doc as a *signal*, not an opportunity.
         // Hard filters can't bind on null/null; the judge decides relevance.
@@ -361,7 +394,18 @@ async function aggregateCandidates(
         (async () => {
           sourcesUsed.push("foundation_grant_history");
           try {
-            const result = await getFoundationGrants({ ein, limit: 10 });
+            const result = await withTimeout(
+              getFoundationGrants({ ein, limit: 10 }),
+              PER_SOURCE_TIMEOUT_MS,
+              null,
+              () => {
+                errors.push({
+                  source: `foundation_grant_history(${ein})`,
+                  message: "timeout",
+                });
+              },
+            );
+            if (!result) return [];
             // Project into "this funder gave $X to peer Y" rows. Each row is
             // a *historical* signal for the org, not a current opportunity.
             return result.grants.map(
@@ -700,7 +744,15 @@ async function enrichGrantsGovAmounts(matches: GrantMatch[]): Promise<void> {
         return;
       }
       try {
-        const { grant } = await fetchGrantDetails({ opportunityId });
+        // Cap per-detail fetch so a single slow grant doesn't drag the
+        // enrichment Promise.all past the function-timeout horizon.
+        const detail = await withTimeout(
+          fetchGrantDetails({ opportunityId }),
+          PER_SOURCE_TIMEOUT_MS,
+          null,
+        );
+        if (!detail) return;
+        const { grant } = detail;
         const enriched = formatAmountRange(grant.awardFloor, grant.awardCeiling);
         // Only overwrite when we actually got useful info — keeps the original
         // "Range not stated" stable when a detail fetch returns nulls too.
@@ -769,15 +821,29 @@ export async function findGrantsForOrg(
   const systemBlocks = buildJudgePreamble(org);
   const userMessage = buildJudgeUserMessage(survivors, topN);
 
-  const response = await anthropic.messages.create({
-    model: JUDGE_MODEL,
-    // 4096 is plenty: ranking 50 items with score + 1-sentence why averages
-    // ~15-20 input tokens per row in output, so 50 * 25 + slack = ~1500.
-    max_tokens: 4096,
-    temperature: 0.2,
-    system: systemBlocks,
-    messages: [{ role: "user", content: userMessage }],
-  });
+  // Bound the judge call with AbortController so it cannot blow past the
+  // Vercel 60s function ceiling. 30s is comfortably more than the judge needs
+  // at the 50-candidate cap (typical: 8-12s), but tight enough that we still
+  // have room for amount-enrichment after.
+  const judgeController = new AbortController();
+  const judgeTimer = setTimeout(() => judgeController.abort(), 30_000);
+  let response: Anthropic.Message;
+  try {
+    response = await anthropic.messages.create(
+      {
+        model: JUDGE_MODEL,
+        // 4096 is plenty: ranking 50 items with score + 1-sentence why averages
+        // ~15-20 input tokens per row in output, so 50 * 25 + slack = ~1500.
+        max_tokens: 4096,
+        temperature: 0.2,
+        system: systemBlocks,
+        messages: [{ role: "user", content: userMessage }],
+      },
+      { signal: judgeController.signal },
+    );
+  } finally {
+    clearTimeout(judgeTimer);
+  }
 
   const judgeText = response.content
     .filter((b): b is Anthropic.TextBlock => b.type === "text")
