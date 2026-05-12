@@ -7,7 +7,8 @@
     "src/app/api/decision-lab/route.ts": { "maxDuration": 60 },
     "src/app/api/decision-lab/follow-up/route.ts": { "maxDuration": 60 },
     "src/app/api/heartbeat/trigger/route.ts": { "maxDuration": 60 },
-    "src/app/api/briefing/generate/route.ts": { "maxDuration": 60 }
+    "src/app/api/briefing/generate/route.ts": { "maxDuration": 60 },
+    "src/app/api/cron/sweep-stuck-streams/route.ts": { "maxDuration": 60 }
   },
   "crons": [
     {
@@ -17,6 +18,10 @@
     {
       "path": "/api/briefing/generate",
       "schedule": "0 12 * * 1-5"
+    },
+    {
+      "path": "/api/cron/sweep-stuck-streams",
+      "schedule": "*/5 * * * *"
     }
   ]
 }
