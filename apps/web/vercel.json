@@ -21,7 +21,7 @@
     },
     {
       "path": "/api/cron/sweep-stuck-streams",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 6 * * *"
     }
   ]
 }
