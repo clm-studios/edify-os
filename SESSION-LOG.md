@@ -368,4 +368,11 @@ Per PRD F3: `lib/tools/{grants,nonprofit,usaspending,ca-grants,charity-navigator
 - Telemetry hook for source-coverage observability (PRD open question 4, deferred unless Citlali asks).
 - Hard-deletion of the 10 source-helper files. PRD F3 explicitly keeps them for backward compat.
 
+### Done
+
+- Commit SHA: `bc4015f6dbd8dc3ce9abcf7440c315d4fc368779`
+- PR URL: https://github.com/clm-studios/edify-os/pull/6
+- Branch pushed to `origin/sprint-alpha-half-search-grants-2026-05-14`
+- PR is OPEN — not auto-merged, awaiting human coordination per `feedback_no_auto_merge_when_shared`.
+
 
