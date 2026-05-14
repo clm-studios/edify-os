@@ -98,7 +98,39 @@ export interface MatcherOptions {
    * without improving rank quality.
    */
   maxCandidates?: number;
+  /**
+   * Narrow the fan-out to specific sources. When omitted, all wired sources
+   * run (status quo). When provided, only the listed slugs are aggregated.
+   * Slugs the engine doesn't yet wire (e.g. "propublica") are accepted but
+   * silently no-op — the enum is part of the meta-tool's public contract.
+   */
+  sources?: GrantSourceSlug[];
+  /**
+   * Optional keyword override. When set, overrides the org's focusArea /
+   * mission as the search-term feed for each source. Used by the
+   * search_grants tool's free-text `keyword` arg.
+   */
+  keyword?: string;
 }
+
+/**
+ * Source slugs the `search_grants` meta-tool accepts via its `sources`
+ * narrowing array. Mirrors the enum in the tool's input_schema. Five of the
+ * nine are not yet wired into the engine (nonprofit/ProPublica, USAspending,
+ * Charity Navigator, Candid Demographics, Inside Philanthropy) — they're
+ * accepted in the enum but no-op in the aggregator. Keeps the public schema
+ * stable so wiring more sources is an internal change.
+ */
+export type GrantSourceSlug =
+  | "grants_gov"
+  | "ca_grants"
+  | "federal_register"
+  | "foundation_grants"
+  | "propublica"
+  | "usaspending"
+  | "charity_navigator"
+  | "candid_demographics"
+  | "inside_philanthropy";
 
 /** One source-agnostic candidate row produced by the aggregator. */
 interface RawCandidate {
@@ -205,9 +237,17 @@ async function aggregateCandidates(
   const sourcesUsed: RawCandidate["source"][] = [];
   const allCandidates: RawCandidate[] = [];
 
-  // Pick the keyword we feed each search. Focus area beats mission for
-  // discriminative power; mission is too long.
-  const keyword = (org.focusArea || org.mission || "").trim();
+  // Source-narrowing gate. When `opts.sources` is provided, only listed
+  // slugs aggregate; unwired slugs in the list are simply ignored. Default
+  // (undefined) = all wired sources run.
+  const allowedSources = opts.sources ? new Set(opts.sources) : null;
+  const isSourceAllowed = (slug: GrantSourceSlug) =>
+    allowedSources === null || allowedSources.has(slug);
+
+  // Pick the keyword we feed each search. Explicit per-call keyword wins;
+  // then focus area; then mission. Mission is the fallback because it's
+  // typically too long for discriminative search.
+  const keyword = (opts.keyword || org.focusArea || org.mission || "").trim();
 
   // Detect CA-relevance from the geography string. We don't run CA Grants
   // Portal for orgs with no California signal — saves a round trip and
@@ -227,8 +267,8 @@ async function aggregateCandidates(
   // so partial failure doesn't kill the whole match.
   const tasks: Array<Promise<RawCandidate[]>> = [];
 
-  // 1. Grants.gov — federal opportunity catalog (always run).
-  tasks.push(
+  // 1. Grants.gov — federal opportunity catalog (always run unless excluded).
+  if (isSourceAllowed("grants_gov")) tasks.push(
     (async () => {
       sourcesUsed.push("grants.gov");
       try {
@@ -283,8 +323,8 @@ async function aggregateCandidates(
     })(),
   );
 
-  // 2. CA Grants Portal — only if geography signals California.
-  if (isCaRelevant) {
+  // 2. CA Grants Portal — only if geography signals California AND not excluded.
+  if (isCaRelevant && isSourceAllowed("ca_grants")) {
     tasks.push(
       (async () => {
         sourcesUsed.push("ca_grants");
@@ -334,7 +374,7 @@ async function aggregateCandidates(
   }
 
   // 3. Federal Register — primary signal, often pre-Grants.gov.
-  tasks.push(
+  if (isSourceAllowed("federal_register")) tasks.push(
     (async () => {
       sourcesUsed.push("federal_register");
       try {
@@ -385,8 +425,13 @@ async function aggregateCandidates(
     })(),
   );
 
-  // 4. Foundation grant history — opt-in only (slow).
-  if (org.foundationEins && org.foundationEins.length > 0) {
+  // 4. Foundation grant history — opt-in only (slow). Also requires the
+  // foundation_grants source to be allowed when a narrowing list is given.
+  if (
+    org.foundationEins &&
+    org.foundationEins.length > 0 &&
+    isSourceAllowed("foundation_grants")
+  ) {
     // Cap parallel calls so a list of 20 EINs doesn't melt the API.
     const einsToFetch = org.foundationEins.slice(0, 5);
     for (const ein of einsToFetch) {
