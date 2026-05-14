@@ -63,7 +63,8 @@ export const TIME_SAVED_ESTIMATES_MINUTES = {
 
   // Grant matcher (the headline Dev Director tool — does the work of an entire grant-research session)
   // Aggregates all sources, applies hard filters, runs Claude judge, returns ranked top 12 with citations.
-  "tool:find_grants_for_org": 240,           // 4 hours: full prospect-research session by hand
+  // Renamed from find_grants_for_org in Sprint α.5 (search_grants meta-tool consolidation).
+  "tool:search_grants": 240,                 // 4 hours: full prospect-research session by hand
 
   // CRM
   "tool:crm_log_interaction": 8,    // updating a donor record manually

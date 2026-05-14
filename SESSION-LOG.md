@@ -276,3 +276,96 @@ route stub stays — only the nav link goes, matching the PRD spirit.)
 ## PR
 
 To be filled after `gh pr create`.
+
+---
+
+# SESSION-LOG — Sprint α.5 (search_grants meta-tool consolidation)
+
+**Identity:** Sonnet coding agent spawned by Lopmon for Sprint α.5
+**Branch:** `sprint-alpha-half-search-grants-2026-05-14`
+**Worktree:** `C:\Users\Araly\edify-os-sprint-alpha-half\`
+**Start UTC:** 2026-05-14T16:23Z
+**Base SHA:** `d5e1d2212d67c33c732df19cb62b7d8a65c11caa`
+**PRD:** `~/life/projects/edify-os/PRD-search-grants-consolidation-2026-05-13.md`
+
+## Plan
+
+Apply **Option A (clean rename)** per PRD recommendation:
+
+1. Reshape `apps/web/src/lib/tools/grant-matcher.ts`: rename tool
+   `find_grants_for_org` → `search_grants`, add PRD F1 schema (`keyword`,
+   `sources` enum array, `due_within_days`, `min_amount`/`max_amount`),
+   thread through to existing engine. Export `searchGrantsTools` +
+   `executeSearchGrantsTool` + `SEARCH_GRANTS_TOOLS_ADDENDUM`.
+2. Extend `apps/web/src/lib/grant-matcher.ts` engine to accept an optional
+   `sources` narrowing array, and a `keyword`/`dueWithinDays` pass-through.
+   Behavior parity: when unspecified, fan out to the same sources as today.
+3. Update Dev Director's `ARCHETYPE_TOOLS` array (registry.ts:304): replace
+   10 grant-related family spreads with `searchGrantsTools` alone.
+4. Update Programs Director's array (registry.ts:320): swap `grantsTools`
+   for `searchGrantsTools` (PRD F3-extension, in scope).
+5. Update `apps/web/src/lib/hours-saved/estimates.ts`: rename
+   `tool:find_grants_for_org` → `tool:search_grants`.
+6. Update `registry.ts` family-set guards + `buildSystemAddendums`: drop
+   the 10 de-registered branches, add a single `search_grants` branch.
+7. Keep the 10 source-helper tool files intact (per PRD F3 backward-compat).
+8. typecheck, /simplify, commit, push, open PR.
+
+## Survey notes
+
+- Dev Director `ARCHETYPE_TOOLS` before: 18 families spread top-level
+  (calendar + 10 grant-related + crm + gmail + drive + memory + report_event
+  + impact_data + consult_teammate).
+- Programs Director before: 7 families including `grantsTools`.
+- Engine (`lib/grant-matcher.ts`) currently fans out to 4 sources:
+  grants.gov, ca_grants, federal_register, foundation_grant_history (opt-in
+  via EINs). The 5 other source helpers (nonprofit/ProPublica, USAspending,
+  Charity Navigator, Candid Demographics, Inside Philanthropy) are not yet
+  wired into the engine. PRD F1 schema lists all 9 enum values; per PRD
+  "behavior parity, not a rewrite", I'll accept all 9 enum values but only
+  filter against the 4 currently-wired sources. Unknown sources are
+  silently ignored (the engine still runs the wired sources unless they're
+  explicitly excluded by a narrowing array). This preserves the enum
+  surface contract while staying strictly within PRD's "no new behavior"
+  scope.
+- No tests in repo. Verification = `pnpm --filter web typecheck`.
+- Files I'll touch:
+  - `apps/web/src/lib/tools/grant-matcher.ts` (rename + reshape)
+  - `apps/web/src/lib/grant-matcher.ts` (engine: add sources/keyword args)
+  - `apps/web/src/lib/tools/registry.ts` (archetype arrays + addendums)
+  - `apps/web/src/lib/hours-saved/estimates.ts` (event-key rename)
+
+## Execution log
+
+### Files modified
+- `apps/web/src/lib/tools/grant-matcher.ts` — rewrote as `search_grants` meta-tool: renamed exports (`searchGrantsTools`, `executeSearchGrantsTool`, `SEARCH_GRANTS_TOOLS_ADDENDUM`), updated tool definition to PRD F1 schema (added `keyword`, `sources` enum array, renamed `deadline_within_days` → `due_within_days`), wired source-narrowing into matcher options. Removed the "use this BEFORE falling back to individual source tools" sentence in the addendum (those tools no longer ship).
+- `apps/web/src/lib/grant-matcher.ts` — engine: added `GrantSourceSlug` exported union (PRD-mandated 9 slugs), extended `MatcherOptions` with `sources?` and `keyword?`, gated each of the 4 wired source fan-out branches on `isSourceAllowed(slug)`. Keyword now falls back through opts.keyword → org.focusArea → org.mission.
+- `apps/web/src/lib/tools/registry.ts` — dropped 10 grant-family imports + re-exports, replaced with `searchGrantsTools` import only. Removed 7 dead family-name Sets + 7 dead `getToolFamilies` branches + 11 dead `buildSystemAddendums` branches (10 source families + grant_matcher; reduced to one `search_grants` branch). Updated Dev Director's `ARCHETYPE_TOOLS` to swap 11 grant-related family spreads for one `...searchGrantsTools`. Updated Programs Director similarly (replaced `grantsTools` with `searchGrantsTools` per PRD recommended extension). Updated `executeTool` dispatcher: removed 10 grant-family branches, added one `SEARCH_GRANTS_TOOL_NAMES.has(name)` branch.
+- `apps/web/src/lib/hours-saved/estimates.ts` — renamed event key `tool:find_grants_for_org` → `tool:search_grants` (preserves 240-min estimate).
+
+### Source-helper tool files preserved
+Per PRD F3: `lib/tools/{grants,nonprofit,usaspending,ca-grants,charity-navigator,candid-demographics,foundation-grants,federal-register,inside-philanthropy}.ts` left intact — their `executeXxxTool` and family exports remain available for any external caller, just no longer registered on any archetype tool array. No imports of those files remain in `registry.ts`.
+
+### Tool count delta
+- **Helga (Dev Director) BEFORE:** 18 family spreads, ~43 distinct tool definitions
+- **Helga (Dev Director) AFTER:** 9 family spreads, 29 distinct tool definitions (10 grant-related families collapsed to 1 `search_grants` tool)
+- **Programs Director BEFORE:** 7 families, 14 tools (`grantsTools` × 2 tools)
+- **Programs Director AFTER:** 7 families, 13 tools (`searchGrantsTools` × 1 tool)
+- Net: Helga drops 14 tool definitions (32% reduction); Programs drops 1.
+
+### Addendum-firing trace verified
+- Dev Director's tool array now includes `searchGrantsTools` (one tool named `search_grants`).
+- `getToolFamilies(tools)` returns a Set including `"search_grants"` via the pinned `SEARCH_GRANTS_TOOL_NAMES` Set (the `name.split("_")[0]` fallback would otherwise resolve to `"search"`, which collides with `search_stock_photo` from Unsplash).
+- `buildSystemAddendums(tools)` then pushes `SEARCH_GRANTS_TOOLS_ADDENDUM` into the system prompt — addendum fires as expected. Manually traced through the registry.ts logic; unit-style verification not possible (no test harness).
+
+### Verification
+- `pnpm --filter web typecheck` — passes.
+- `pnpm typecheck` (turbo, all 4 packages) — passes (3 cached, web cache-miss rebuild green).
+- `/simplify` review pass: moved `validSources` Set from per-call construction to a module-level constant `VALID_SOURCE_SLUGS`. No further issues identified.
+
+### Out-of-scope items deliberately not done
+- Wiring the 5 currently-unwired sources (propublica, usaspending, charity_navigator, candid_demographics, inside_philanthropy) into `lib/grant-matcher.ts` aggregator. PRD F1 fixed the schema to 9 enum values, but the engine's fan-out only covers 4. The unwired slugs are accepted in the input array but silently no-op. Per PRD: "Behavior parity, not a rewrite" + "Adding new sources — that's a separate sprint when new free-data sources surface."
+- Telemetry hook for source-coverage observability (PRD open question 4, deferred unless Citlali asks).
+- Hard-deletion of the 10 source-helper files. PRD F3 explicitly keeps them for backward compat.
+
+
