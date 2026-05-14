@@ -423,8 +423,15 @@ Per PRD F3: `lib/tools/{grants,nonprofit,usaspending,ca-grants,charity-navigator
 - [x] Implementation
 - [x] Typecheck
 - [x] /simplify
-- [ ] Commit
-- [ ] Push
-- [ ] PR opened
-- [ ] PR URL captured
+- [x] Commit
+- [x] Push
+- [x] PR opened
+- [x] PR URL captured
+
+## Done
+
+- Commit SHA: `3c66dff862b2c333a451fab977e35924b31228bf`
+- PR URL: https://github.com/clm-studios/edify-os/pull/8
+- Branch pushed to `origin/bug-6-option-a-integrations-token-validate-2026-05-14`
+- PR is OPEN — not auto-merged, awaiting human coordination per `feedback_no_auto_merge_when_shared`.
 
