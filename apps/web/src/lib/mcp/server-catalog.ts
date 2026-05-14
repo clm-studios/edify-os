@@ -180,7 +180,12 @@ const SLACK_ENTRY: ServerCatalogEntry = {
   url: "https://mcp.slack.com/sse",
   authMode: "bearer-env",
   bearerEnv: "SLACK_MCP_OAUTH_TOKEN",
-  archetypes: ["marketing_director"],
+  // Sprint α (2026-05-14): added hr_volunteer_coordinator. Per the archetype
+  // tools extension proposal §Sprint α, Sweet's primary coordination surface
+  // is Slack (volunteer scheduling, shift confirmations, comms with on-call
+  // staff) — gating it to Marketing only left Sweet without a real chat
+  // channel for the people she coordinates with.
+  archetypes: ["marketing_director", "hr_volunteer_coordinator"],
 };
 
 /**
@@ -392,17 +397,20 @@ const ZAPIER_ENTRY: ServerCatalogEntry = {
   url: "",
   authMode: "url-from-env",
   urlEnv: "ZAPIER_MCP_URL",
-  // Broad multi-archetype scope — Zapier is a meta-connector. HR & Volunteer
-  // Coordinator is intentionally omitted for now: per the archetype roadmap,
-  // HR's first integration priority is Slack MCP (already wired), and adding
-  // Zapier here without a clear HR-specific Zap use case would only inflate
-  // the model's tool budget.
+  // Broad multi-archetype scope — Zapier is a meta-connector.
+  //
+  // Sprint α (2026-05-14): added hr_volunteer_coordinator. Per the archetype
+  // tools extension proposal §Sprint α, Sweet needs Zapier's long-tail reach
+  // for volunteer-management SaaS (Track It Forward, Better Impact,
+  // SignUp.com, etc.) that aren't on the direct-MCP roadmap — unlocks ~12+
+  // Zap-routed tools for Sweet at zero new vendor cost.
   archetypes: [
     "marketing_director",
     "programs_director",
     "development_director",
     "executive_assistant",
     "events_director",
+    "hr_volunteer_coordinator",
   ],
 };
 

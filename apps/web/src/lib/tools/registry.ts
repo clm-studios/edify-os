@@ -239,7 +239,7 @@ export const ARCHETYPE_TOOLS: Record<ArchetypeSlug, Anthropic.Tool[]> = {
     ...consultTeammateTools,
   ],
   programs_director: [...searchGrantsTools, ...driveTools, ...memoryTools, ...reportEventTools, ...impactDataWriteTools, ...impactDataReadTools, ...consultTeammateTools],
-  hr_volunteer_coordinator: [...driveTools, ...memoryTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
+  hr_volunteer_coordinator: [...calendarTools, ...gmailTools, ...driveTools, ...memoryTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
 };
 
 /**
