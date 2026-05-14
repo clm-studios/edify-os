@@ -71,11 +71,11 @@ Tightened the Zapier-entry provenance comment in `server-catalog.ts` from 9 line
 
 ## Commit
 
-To be filled after `git commit`.
+`74948d68b9fabdcc671de696cc2f0d2bd3f66081` — initial Sprint α commit on `sprint-alpha-sweet-cheap-win-2026-05-14`. Follow-up commit fills these fields in this log.
 
 ## PR
 
-To be filled after `gh pr create`.
+https://github.com/clm-studios/edify-os/pull/5 — open, targeting `main`. Co-skim queued for Minervamon. Do not auto-merge — humans coordinate (per `feedback_no_auto_merge_when_shared`).
 
 ---
 
