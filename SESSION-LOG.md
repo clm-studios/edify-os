@@ -412,8 +412,9 @@ the existing redirect pattern at
 
 ## Done
 
-- Commit SHA: (filled in below)
-- PR URL: (filled in below)
+- Commit SHA: `483238e`
+- PR URL: https://github.com/clm-studios/edify-os/pull/7
+- Branch pushed to `origin/bug-3-knowledge-memory-redirect-2026-05-14`
 - PR is OPEN — not auto-merged, awaiting human coordination per
   `feedback_no_auto_merge_when_shared`.
 
