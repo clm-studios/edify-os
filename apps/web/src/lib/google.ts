@@ -174,12 +174,102 @@ function refreshTokenDeduped(
 // ---------------------------------------------------------------------------
 
 /**
+ * Pure (no-NextResponse) variant of token resolution. Returns a discriminated
+ * union describing the result so non-error callers (e.g. the Integrations page
+ * status endpoint) can branch on it without owning HTTP shape.
+ *
+ * Outcomes:
+ *   - `{ ok: true, accessToken }`  — caller has a fresh decrypted token
+ *   - `{ ok: false, reason }`      — caller should surface as not-connected /
+ *                                    needs-reconnect; `reason` describes why
+ *
+ * Used by both `getValidGoogleAccessToken` (which maps the result to a
+ * NextResponse-style error contract) and the Integrations page connection-
+ * status route (which maps it to `{ connected, authError }`).
+ *
+ * Named `inspectGoogleToken` (not `resolveGoogleToken`) to avoid colliding
+ * with the unrelated local helper of that name in `lib/tools/registry.ts`.
+ */
+export type GoogleTokenInspection =
+  | { ok: true; accessToken: string }
+  | {
+      ok: false;
+      reason:
+        | "not_connected" // no row, or row not active
+        | "missing_access_token" // active row but no encrypted access token
+        | "decrypt_failed" // crypto error reading stored token
+        | "expired_no_refresh" // token past 60s buffer, no refresh token
+        | "refresh_failed"; // refresh token present but Google rejected it
+    };
+
+export async function inspectGoogleToken(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  serviceClient: SupabaseClient<any>,
+  orgId: string,
+  integrationType: GoogleIntegrationType
+): Promise<GoogleTokenInspection> {
+  const { data: integration, error: dbError } = await serviceClient
+    .from("integrations")
+    .select(
+      "id, access_token_encrypted, refresh_token_encrypted, token_expires_at, status"
+    )
+    .eq("org_id", orgId)
+    .eq("type", integrationType)
+    .single();
+
+  if (dbError || !integration) return { ok: false, reason: "not_connected" };
+  if (integration.status !== "active") return { ok: false, reason: "not_connected" };
+
+  const rawAccessToken = integration.access_token_encrypted as string | null;
+  const rawRefreshToken = integration.refresh_token_encrypted as string | null;
+  const expiresAt = integration.token_expires_at as string | null;
+
+  if (!rawAccessToken) return { ok: false, reason: "missing_access_token" };
+
+  // Decrypt tokens — decryptIfEncrypted handles legacy plaintext rows gracefully
+  let accessToken: string | null;
+  let refreshToken: string | null;
+  try {
+    accessToken = decryptIfEncrypted(rawAccessToken, CRYPTO_LABEL_GOOGLE_ACCESS_TOKEN);
+  } catch (err) {
+    console.error('[google] Failed to decrypt access token', { orgId, integrationType, error: err });
+    return { ok: false, reason: "decrypt_failed" };
+  }
+  try {
+    refreshToken = decryptIfEncrypted(rawRefreshToken, CRYPTO_LABEL_GOOGLE_REFRESH_TOKEN);
+  } catch (err) {
+    console.error('[google] Failed to decrypt refresh token', { orgId, integrationType, error: err });
+    return { ok: false, reason: "decrypt_failed" };
+  }
+
+  if (!accessToken) return { ok: false, reason: "missing_access_token" };
+
+  // Check if token is still valid (with 60s buffer)
+  if (expiresAt) {
+    const expiresMs = new Date(expiresAt).getTime();
+    const nowMs = Date.now();
+    if (expiresMs - nowMs > 60_000) {
+      return { ok: true, accessToken };
+    }
+  }
+
+  // Token expired (or no expiry stored) — refresh
+  if (!refreshToken) return { ok: false, reason: "expired_no_refresh" };
+
+  const refreshed = await refreshTokenDeduped(serviceClient, orgId, refreshToken);
+  if ("error" in refreshed) return { ok: false, reason: "refresh_failed" };
+  return { ok: true, accessToken: refreshed.accessToken };
+}
+
+/**
  * Returns a valid Google access token for the given org + integration type.
  * Reads the integrations row, refreshes if within 60s of expiry, and updates
  * all 3 Google rows (they share a token set) when refreshing.
  *
  * Returns { accessToken: string } or { error: NextResponse } — caller pattern
- * matches getAnthropicClientForOrg.
+ * matches getAnthropicClientForOrg. Internally delegates to `inspectGoogleToken`
+ * and maps the discriminated union onto the NextResponse error contract that
+ * EA tools rely on.
  *
  * Usage:
  *   const result = await getValidGoogleAccessToken(serviceClient, orgId, 'google_calendar');
@@ -192,94 +282,44 @@ export async function getValidGoogleAccessToken(
   orgId: string,
   integrationType: GoogleIntegrationType
 ): Promise<{ accessToken: string } | { error: NextResponse }> {
-  // Read the integration row
-  const { data: integration, error: dbError } = await serviceClient
-    .from("integrations")
-    .select(
-      "id, access_token_encrypted, refresh_token_encrypted, token_expires_at, status"
-    )
-    .eq("org_id", orgId)
-    .eq("type", integrationType)
-    .single();
+  const inspection = await inspectGoogleToken(serviceClient, orgId, integrationType);
+  if (inspection.ok) return { accessToken: inspection.accessToken };
 
-  if (dbError || !integration) {
-    return {
-      error: NextResponse.json(
-        { error: "Google integration not connected" },
-        { status: 404 }
-      ),
-    };
+  switch (inspection.reason) {
+    case "not_connected":
+      return {
+        error: NextResponse.json(
+          { error: "Google integration not connected" },
+          { status: 404 }
+        ),
+      };
+    case "missing_access_token":
+      return {
+        error: NextResponse.json(
+          { error: "Google integration missing access token" },
+          { status: 500 }
+        ),
+      };
+    case "decrypt_failed":
+      return {
+        error: NextResponse.json(
+          { error: "Could not access stored Google credentials. Please reconnect Google in Settings." },
+          { status: 500 }
+        ),
+      };
+    case "expired_no_refresh":
+      return {
+        error: NextResponse.json(
+          { error: "Google token expired and no refresh token available. Please reconnect Google." },
+          { status: 401 }
+        ),
+      };
+    case "refresh_failed":
+      return {
+        error: NextResponse.json(
+          { error: "Google token refresh failed. Please reconnect Google." },
+          { status: 401 }
+        ),
+      };
   }
-
-  if (integration.status !== "active") {
-    return {
-      error: NextResponse.json(
-        { error: "Google integration not connected" },
-        { status: 404 }
-      ),
-    };
-  }
-
-  const rawAccessToken = integration.access_token_encrypted as string | null;
-  const rawRefreshToken = integration.refresh_token_encrypted as string | null;
-  const expiresAt = integration.token_expires_at as string | null;
-
-  if (!rawAccessToken) {
-    return {
-      error: NextResponse.json(
-        { error: "Google integration missing access token" },
-        { status: 500 }
-      ),
-    };
-  }
-
-  // Decrypt tokens — decryptIfEncrypted handles legacy plaintext rows gracefully
-  let accessToken: string | null;
-  let refreshToken: string | null;
-  try {
-    accessToken = decryptIfEncrypted(rawAccessToken, CRYPTO_LABEL_GOOGLE_ACCESS_TOKEN);
-  } catch (err) {
-    console.error('[google] Failed to decrypt access token', { orgId, integrationType, error: err });
-    return { error: NextResponse.json({ error: "Could not access stored Google credentials. Please reconnect Google in Settings." }, { status: 500 }) };
-  }
-  try {
-    refreshToken = decryptIfEncrypted(rawRefreshToken, CRYPTO_LABEL_GOOGLE_REFRESH_TOKEN);
-  } catch (err) {
-    console.error('[google] Failed to decrypt refresh token', { orgId, integrationType, error: err });
-    return { error: NextResponse.json({ error: "Could not access stored Google credentials. Please reconnect Google in Settings." }, { status: 500 }) };
-  }
-
-  if (!accessToken) {
-    return {
-      error: NextResponse.json(
-        { error: "Google integration missing access token" },
-        { status: 500 }
-      ),
-    };
-  }
-
-  // Check if token is still valid (with 60s buffer)
-  if (expiresAt) {
-    const expiresMs = new Date(expiresAt).getTime();
-    const nowMs = Date.now();
-    if (expiresMs - nowMs > 60_000) {
-      // Token still good — return the DECRYPTED token
-      return { accessToken };
-    }
-  }
-
-  // Token expired (or no expiry stored) — refresh
-  if (!refreshToken) {
-    return {
-      error: NextResponse.json(
-        {
-          error:
-            "Google token expired and no refresh token available. Please reconnect Google.",
-        },
-        { status: 401 }
-      ),
-    };
-  }
-
-  return refreshTokenDeduped(serviceClient, orgId, refreshToken);
 }

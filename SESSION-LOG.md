@@ -376,3 +376,55 @@ Per PRD F3: `lib/tools/{grants,nonprofit,usaspending,ca-grants,charity-navigator
 - PR is OPEN — not auto-merged, awaiting human coordination per `feedback_no_auto_merge_when_shared`.
 
 
+---
+
+# SESSION-LOG — Bug 6 Option A (Integrations-page token-freshness validation)
+
+**Identity:** Sonnet coding agent spawned by Lopmon
+**Branch:** `bug-6-option-a-integrations-token-validate-2026-05-14`
+**Worktree:** `C:\Users\Araly\edify-os-bug-6-option-a`
+**Start UTC:** 2026-05-14 (early UTC)
+**Base SHA:** `29ab28b5e77c6f037f5628b3e72caa5a7cf91865`
+**Diagnostic:** `~/life/projects/edify-os/bug-6-gmail-ea-scope-mismatch-diagnostic-2026-05-13.md`
+
+## Plan (from diagnostic §Option A)
+
+1. Extract a pure token-validation helper from `lib/google.ts` returning a discriminated union (no NextResponse). `getValidGoogleAccessToken` keeps its current EA-tool contract by delegating internally.
+2. Modify `apps/web/src/app/api/integrations/google/route.ts` GET to call the new helper. Return `{ connected: false, authError: true }` when token exists but is expired AND cannot be silently refreshed.
+3. Update `apps/web/src/app/dashboard/integrations/page.tsx` to consume `authError` and render an actionable "Google token expired. Please reconnect." state on Google cards. Pattern mirrors the existing `/api/integrations/google/today-events` route's `connected + authError` contract.
+
+## Survey notes
+
+- `route.ts` GET handler (current): selects `status='active'` only — no token-freshness check (matches diagnostic claim).
+- `getValidGoogleAccessToken` lives at `lib/google.ts:189-285` and returns either `{ accessToken }` or `{ error: NextResponse }`.
+- Diagnostic's reference to `lib/google.ts:366` for the `GOOGLE_NOT_CONNECTED` constant is stale — the constant actually lives at `lib/tools/registry.ts:287`. Doesn't change the fix; the EA error path is what we're mirroring on the Integrations page side.
+- Precedent for the response shape: `/api/integrations/google/today-events/route.ts` already returns `{ connected, authError, events }` — same pattern fits here.
+
+## Files changed
+
+- `apps/web/src/lib/google.ts` — added `inspectGoogleToken(serviceClient, orgId, type)` exported helper returning a `GoogleTokenInspection` discriminated union (`{ ok: true, accessToken } | { ok: false, reason: ... }`). Existing `getValidGoogleAccessToken` now delegates to it and maps the union onto the same NextResponse error contract EA tools already rely on (zero behavioral change for EA path).
+- `apps/web/src/app/api/integrations/google/route.ts` — GET handler now calls `inspectGoogleToken` on the active integration row. Returns `{ connected: false, email, authError: true }` when the row exists but the stored token is expired / refresh dead / decrypt failed. Added an exported `GoogleIntegrationStatusResponse` type for the new contract.
+- `apps/web/src/app/dashboard/integrations/page.tsx` — added `googleAuthError` state; the Google-status fetch sets it when `authError: true` arrives. Card footer renders a fourth branch ("Google token expired. Please reconnect." + Reconnect CTA) on Gmail/Calendar/Drive cards when the flag is set. The reconnect button uses the existing `handleConnectClick` to trigger the OAuth flow. State is cleared on successful reconnect (?google=connected) and on disconnect.
+
+## /simplify findings + fixes
+
+- **Naming collision:** initial implementation exported `resolveGoogleToken` from `lib/google.ts`, which collided with an existing local helper of the same name in `lib/tools/registry.ts:291`. Renamed the new export to `inspectGoogleToken` + `GoogleTokenInspection` to make the difference between "give me a usable token (registry helper)" and "what's the token state (new helper)" legible. No other reuse / quality / efficiency issues required action.
+
+## Verification
+
+- `pnpm --filter web typecheck` — green
+- `pnpm typecheck` (turbo, 4 packages) — 4/4 green (web cache-miss rebuild)
+- Manual reasoning: EA tools call `getValidGoogleAccessToken`, which now delegates to `inspectGoogleToken`. Integrations page calls `inspectGoogleToken` directly. Same DB read, same decrypt, same refresh path, same 60s buffer — so the page's "connected" determination is now exactly aligned with what EA tools will see on the very next call.
+
+## Progress
+- [x] Worktree created
+- [x] Diagnostic read
+- [x] Source files surveyed
+- [x] Implementation
+- [x] Typecheck
+- [x] /simplify
+- [ ] Commit
+- [ ] Push
+- [ ] PR opened
+- [ ] PR URL captured
+
