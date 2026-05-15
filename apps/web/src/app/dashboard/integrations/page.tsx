@@ -664,6 +664,10 @@ function IntegrationsPageInner() {
   const [activeCategory, setActiveCategory] = useState('all');
   const [connected, setConnected] = useState<Set<string>>(new Set());
   const [googleEmail, setGoogleEmail] = useState<string | null>(null);
+  /** True when an active Google integration row exists but the stored token is
+   *  expired and can't be silently refreshed. Drives the "reconnect" CTA on
+   *  Gmail/Calendar/Drive cards (Bug 6 Option A — diagnostic 2026-05-13). */
+  const [googleAuthError, setGoogleAuthError] = useState(false);
   const [canvaEmail, setCanvaEmail] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [oauthModalId, setOauthModalId] = useState<string | null>(null);
@@ -678,9 +682,15 @@ function IntegrationsPageInner() {
       try {
         const res = await fetch('/api/integrations/google');
         if (!res.ok) return;
-        const data = await res.json() as { connected: boolean; email: string | null };
+        const data = await res.json() as { connected: boolean; email: string | null; authError?: boolean };
         if (data.connected) {
           setConnected((prev) => new Set([...prev, 'gmail', 'google_calendar', 'google_drive']));
+          setGoogleEmail(data.email ?? null);
+        } else if (data.authError) {
+          // Active row exists but token can't be validated — keep email so
+          // the user knows which account needs reconnecting; flag authError
+          // so the cards render the reconnect CTA instead of "Connected".
+          setGoogleAuthError(true);
           setGoogleEmail(data.email ?? null);
         }
       } catch {
@@ -760,6 +770,8 @@ function IntegrationsPageInner() {
   useEffect(() => {
     const googleParam = searchParams.get('google');
     if (googleParam === 'connected') {
+      // Successful reconnect clears any prior token-expired state.
+      setGoogleAuthError(false);
       const celebText = getCelebrationText('google');
       if (celebText) setCelebrationMessage(celebText);
       else setToast({ message: 'Google Workspace connected successfully!', kind: 'success' });
@@ -936,6 +948,7 @@ function IntegrationsPageInner() {
           return next;
         });
         setGoogleEmail(null);
+        setGoogleAuthError(false);
         setExpandedId(null);
         setToast({ message: 'Google Workspace disconnected.', kind: 'success' });
       } catch {
@@ -1116,6 +1129,7 @@ function IntegrationsPageInner() {
           const cat = CATEGORIES[i.category];
           const Icon = i.icon;
           const isConnected = connected.has(i.id);
+          const isGoogleAuthError = googleAuthError && GOOGLE_INTEGRATION_IDS.has(i.id);
 
           return (
             <div
@@ -1185,6 +1199,13 @@ function IntegrationsPageInner() {
                 </p>
               )}
 
+              {/* Google token-expired badge (Bug 6 — Option A) */}
+              {isGoogleAuthError && googleEmail && (
+                <p className="mt-2 text-xs text-fg-4">
+                  Previously linked to <span className="font-medium text-fg-2">{googleEmail}</span>
+                </p>
+              )}
+
               {/* Canva email badge */}
               {isConnected && CANVA_INTEGRATION_IDS.has(i.id) && canvaEmail && (
                 <p className="mt-2 text-xs text-fg-4">
@@ -1207,6 +1228,18 @@ function IntegrationsPageInner() {
                       Disconnect
                     </button>
                   </>
+                ) : isGoogleAuthError ? (
+                  <div className="w-full space-y-2">
+                    <p className="text-xs font-medium text-amber-700">
+                      Google token expired. Please reconnect.
+                    </p>
+                    <button
+                      onClick={() => handleConnectClick(i.id)}
+                      className="btn-primary w-full text-sm"
+                    >
+                      Reconnect {i.name}
+                    </button>
+                  </div>
                 ) : i.connectionType === 'oauth' && !hasRealOAuthFlow(i.id) ? (
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-bg-3 px-3 py-1.5 text-xs font-medium text-fg-3 w-full justify-center">
                     Coming soon

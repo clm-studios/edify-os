@@ -2,10 +2,28 @@ import { NextResponse } from "next/server";
 import { getAuthContext, createServiceRoleClient } from "@/lib/supabase/server";
 import {
   GOOGLE_INTEGRATION_TYPES,
+  inspectGoogleToken,
   type GoogleIntegrationConfig,
 } from "@/lib/google";
 
-/** GET /api/integrations/google — current Google connection status for the org */
+export type GoogleIntegrationStatusResponse = {
+  connected: boolean;
+  email: string | null;
+  /** True when an `active` row exists but the stored token is unusable
+   *  (expired, refresh failed, decrypt failed). Drives the page UI to surface
+   *  "Google token expired. Please reconnect." instead of the never-connected
+   *  state. Matches the contract used by /api/integrations/google/today-events. */
+  authError?: boolean;
+};
+
+/** GET /api/integrations/google — current Google connection status for the org.
+ *
+ *  Validates token freshness via the shared `inspectGoogleToken` helper that
+ *  the EA tools use (`getValidGoogleAccessToken` delegates to the same helper),
+ *  so a stale-token Gmail account no longer reports "Connected" on the
+ *  Integrations page while EA tools fail with GOOGLE_NOT_CONNECTED
+ *  (Bug 6, Option A — diagnostic 2026-05-13).
+ */
 export async function GET() {
   const { user, orgId } = await getAuthContext();
   if (!user || !orgId) {
@@ -30,12 +48,37 @@ export async function GET() {
     return NextResponse.json({ error: "Failed to fetch status" }, { status: 500 });
   }
 
-  const connected = (data ?? []).length > 0;
-  const googleEmail = connected
-    ? ((data![0].config as GoogleIntegrationConfig)?.google_email ?? null)
-    : null;
+  const rows = data ?? [];
+  if (rows.length === 0) {
+    return NextResponse.json({
+      connected: false,
+      email: null,
+    } satisfies GoogleIntegrationStatusResponse);
+  }
 
-  return NextResponse.json({ connected, email: googleEmail });
+  const googleEmail =
+    (rows[0].config as GoogleIntegrationConfig | null)?.google_email ?? null;
+  const integrationType = rows[0].type as (typeof GOOGLE_INTEGRATION_TYPES)[number];
+
+  // Validate token freshness with the same helper the EA tools use. If the
+  // stored token is unusable (expired with no/dead refresh, decrypt error,
+  // etc.) we surface `connected: false + authError: true` so the page can
+  // tell the user "expired, reconnect" instead of falsely implying success.
+  // Token refresh will silently rotate the access token and update all 3 rows
+  // (see refreshTokenDeduped in lib/google.ts).
+  const inspection = await inspectGoogleToken(serviceClient, orgId, integrationType);
+  if (inspection.ok) {
+    return NextResponse.json({
+      connected: true,
+      email: googleEmail,
+    } satisfies GoogleIntegrationStatusResponse);
+  }
+
+  return NextResponse.json({
+    connected: false,
+    email: googleEmail,
+    authError: true,
+  } satisfies GoogleIntegrationStatusResponse);
 }
 
 /**
