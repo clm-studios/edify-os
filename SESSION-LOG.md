@@ -77,6 +77,34 @@ Tightened the Zapier-entry provenance comment in `server-catalog.ts` from 9 line
 
 https://github.com/clm-studios/edify-os/pull/5 — open, targeting `main`. Co-skim queued for Minervamon. Do not auto-merge — humans coordinate (per `feedback_no_auto_merge_when_shared`).
 
+## Rebase log (2026-05-14, post-PR-#6/#7/#8 merges)
+
+**Trigger:** PR #5 went to CONFLICTING/DIRTY after PR #6 (search_grants consolidation) merged 2026-05-14T22:23Z. PRs #7 (knowledge redirect) and #8 (Bug 6 EA token validate) also merged in the same window. Branch needed to rebase onto current `origin/main` (`d2e6a64`).
+
+**Rebase agent:** Sonnet, spawned by Lopmon, working in worktree `C:\Users\Araly\edify-os-sprint-alpha`.
+
+**Conflict files:** 1 — `apps/web/src/lib/tools/registry.ts`.
+
+**Resolution:** The conflict was in the `ARCHETYPE_TOOLS` block. Main (post-PR-#6) had `programs_director` switched from `grantsTools` → `searchGrantsTools` and the surrounding imports/family-Sets restructured. PR #5 carried the obsolete `grantsTools` reference (because it branched from pre-PR-#6 main) plus the actual intended change: adding `...calendarTools, ...gmailTools` to Sweet's (`hr_volunteer_coordinator`) array. Resolved by keeping main's `programs_director: [...searchGrantsTools, ...]` line verbatim and applying PR #5's edit to Sweet's line:
+
+```
+hr_volunteer_coordinator: [...calendarTools, ...gmailTools, ...driveTools, ...memoryTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools]
+```
+
+Sweet's array on main did NOT contain `searchGrantsTools` (PR #6 only touched Dev Director + Programs Director's arrays, not Sweet's), so nothing else from main needed to be preserved inside Sweet's bracket. `server-catalog.ts` and `SESSION-LOG.md` auto-merged cleanly (PR #6 didn't touch either file).
+
+**Auto-merge note:** `SESSION-LOG.md` had auto-merged via the rebase against PRs #7 and #8's appended sections — they sit below PR #5's section in this file, no manual conflict.
+
+**Post-rebase HEAD SHA:** `dd68267c0606c58ae57fe33ff58a5de7d8d62142` (was `9487781`).
+- Commit 1 (Sprint α core): `59f498f` (was `74948d6`)
+- Commit 2 (SESSION-LOG follow-up): `dd68267` (was `9487781`)
+
+**Typecheck:** `pnpm --filter web typecheck` — exit 0 (clean).
+
+**Force-push:** `git push --force-with-lease origin sprint-alpha-sweet-cheap-win-2026-05-14` — pending below.
+
+**GitHub mergeStateStatus after force-push:** pending below.
+
 ---
 
 # SESSION-LOG — Async UX Hardening Agent
