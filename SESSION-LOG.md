@@ -1,3 +1,112 @@
+# SESSION-LOG — Sprint α Sweet cheap-win (HR / Volunteer Coordinator)
+
+**Identity:** Sprint α Sweet cheap-win agent (Sonnet, spawned by Lopmon)
+**Branch:** `sprint-alpha-sweet-cheap-win-2026-05-14`
+**Worktree:** `C:\Users\Araly\edify-os-sprint-alpha`
+**Base:** `origin/main` @ `d5e1d22`
+**Date:** 2026-05-14
+**Task:** Sprint α from `archetype-tools-extension-proposal-2026-05-13.md` §Sprint α (lines 331-337). Take Sweet from near-zero domain tools to ~14 useful tools via three targeted edits (no new vendor work).
+
+---
+
+## Plan
+
+1. Create worktree (done).
+2. Read PRD §Sprint α + verify file shapes (done).
+3. Three targeted edits:
+   - Add `hr_volunteer_coordinator` to Slack MCP's `archetypes` scope
+   - Add `gmailTools` + `calendarTools` to Sweet's tool list in `ARCHETYPE_TOOLS`
+   - Add `hr_volunteer_coordinator` to Zapier MCP's `archetypes` scope
+4. Verify Sweet's prompt-addenda pipeline (read-only).
+5. Typecheck + lint.
+6. `/simplify` review.
+7. Commit, push, open PR (do NOT merge).
+
+---
+
+## Code reconnaissance (file shapes)
+
+PRD line numbers were approximate. Actual locations (file paths + lines verified):
+
+- **Slack MCP entry** — `apps/web/src/lib/mcp/server-catalog.ts`, `SLACK_ENTRY` declared at line 176-184. `archetypes` array is line 183: `archetypes: ["marketing_director"]`. PRD path `lib/server-catalog.ts` was outdated; actual file under `lib/mcp/`.
+- **Sweet's tool list** — `apps/web/src/lib/tools/registry.ts`, `ARCHETYPE_TOOLS` declared at line 301. Sweet's entry is line 321:
+  `hr_volunteer_coordinator: [...driveTools, ...memoryTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools]`.
+  PRD path `lib/registry.ts` was outdated; actual file under `lib/tools/`. `gmailTools` and `calendarTools` are already imported at the top of this file (lines 11 and 23).
+- **Zapier MCP entry** — same `apps/web/src/lib/mcp/server-catalog.ts`, `ZAPIER_ENTRY` declared at line 386-407. `archetypes` array starts line 400 with 5 entries (marketing_director, programs_director, development_director, executive_assistant, events_director). Per the existing comment at lines 395-399, HR was *intentionally* omitted earlier because there was no clear HR-specific Zap use case. Sprint α reverses that decision — Sweet now joins the Zapier meta-connector scope.
+
+---
+
+## Prompt-addenda pipeline verification
+
+Sweet's prompt-addenda pipeline is correct and fires automatically when she gains Gmail/Calendar tools. Trace:
+
+1. **Archetype base prompt** — `apps/web/src/lib/archetype-prompts.ts:554`:
+   `hr_volunteer_coordinator: HR_VOLUNTEER_COORDINATOR_PROMPT + MEMORY_POSTFIX + IMPACT_DATA_POSTFIX`
+2. **Tool resolution** — `apps/web/src/lib/chat/run-archetype-turn.ts:157`:
+   `resolveArchetypeTools({ archetype, ... })` reads `ARCHETYPE_TOOLS[archetype]` (i.e. Sweet's array, which now includes `gmailTools` + `calendarTools`).
+3. **Tool-family addenda composition** — `run-archetype-turn.ts:162`:
+   `toolAddendums = buildSystemAddendums(tools)`.
+   `buildSystemAddendums` (`lib/tools/registry.ts:263-294`) walks the tools array, detects families, and concatenates `GMAIL_TOOLS_ADDENDUM` (line 278) + `CALENDAR_TOOLS_ADDENDUM` (line 266) into the addenda string.
+4. **Final system prompt** — `run-archetype-turn.ts:188`:
+   `cachedSystemText = systemPrompt + orgContext + toolAddendums + skillsAddendum + frontendDesignAddendum`.
+
+**Conclusion:** no code change needed. Adding `gmailTools` + `calendarTools` to Sweet's `ARCHETYPE_TOOLS` array is sufficient — the addenda will fire automatically.
+
+---
+
+## Code changes
+
+- `apps/web/src/lib/mcp/server-catalog.ts` — `SLACK_ENTRY.archetypes` gains `hr_volunteer_coordinator` (with provenance comment); `ZAPIER_ENTRY.archetypes` gains `hr_volunteer_coordinator` (existing "HR intentionally omitted" comment trimmed + updated to reflect Sprint α reversal).
+- `apps/web/src/lib/tools/registry.ts` — Sweet's entry in `ARCHETYPE_TOOLS` (`hr_volunteer_coordinator: [...]`) gains `...calendarTools` and `...gmailTools` prefixed onto the existing tool array. Imports for both already present at the top of the file.
+- `SESSION-LOG.md` — this log.
+
+## /simplify pass
+
+Tightened the Zapier-entry provenance comment in `server-catalog.ts` from 9 lines to 7 lines — kept the historical "HR was intentionally omitted" context plus the Sprint α reversal note, dropped redundant phrasing. No other changes needed; the diff was already minimal.
+
+## Verification
+
+- `pnpm --filter web typecheck` — passes (4/4 packages green) on the final committed state.
+- Prompt-addenda pipeline verified read-only (see above) — `gmailTools` + `calendarTools` trigger `GMAIL_TOOLS_ADDENDUM` + `CALENDAR_TOOLS_ADDENDUM` injection into Sweet's system prompt automatically via `buildSystemAddendums`. No prompt changes needed.
+
+## Commit
+
+`74948d68b9fabdcc671de696cc2f0d2bd3f66081` — initial Sprint α commit on `sprint-alpha-sweet-cheap-win-2026-05-14`. Follow-up commit fills these fields in this log.
+
+## PR
+
+https://github.com/clm-studios/edify-os/pull/5 — open, targeting `main`. Co-skim queued for Minervamon. Do not auto-merge — humans coordinate (per `feedback_no_auto_merge_when_shared`).
+
+## Rebase log (2026-05-14, post-PR-#6/#7/#8 merges)
+
+**Trigger:** PR #5 went to CONFLICTING/DIRTY after PR #6 (search_grants consolidation) merged 2026-05-14T22:23Z. PRs #7 (knowledge redirect) and #8 (Bug 6 EA token validate) also merged in the same window. Branch needed to rebase onto current `origin/main` (`d2e6a64`).
+
+**Rebase agent:** Sonnet, spawned by Lopmon, working in worktree `C:\Users\Araly\edify-os-sprint-alpha`.
+
+**Conflict files:** 1 — `apps/web/src/lib/tools/registry.ts`.
+
+**Resolution:** The conflict was in the `ARCHETYPE_TOOLS` block. Main (post-PR-#6) had `programs_director` switched from `grantsTools` → `searchGrantsTools` and the surrounding imports/family-Sets restructured. PR #5 carried the obsolete `grantsTools` reference (because it branched from pre-PR-#6 main) plus the actual intended change: adding `...calendarTools, ...gmailTools` to Sweet's (`hr_volunteer_coordinator`) array. Resolved by keeping main's `programs_director: [...searchGrantsTools, ...]` line verbatim and applying PR #5's edit to Sweet's line:
+
+```
+hr_volunteer_coordinator: [...calendarTools, ...gmailTools, ...driveTools, ...memoryTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools]
+```
+
+Sweet's array on main did NOT contain `searchGrantsTools` (PR #6 only touched Dev Director + Programs Director's arrays, not Sweet's), so nothing else from main needed to be preserved inside Sweet's bracket. `server-catalog.ts` and `SESSION-LOG.md` auto-merged cleanly (PR #6 didn't touch either file).
+
+**Auto-merge note:** `SESSION-LOG.md` had auto-merged via the rebase against PRs #7 and #8's appended sections — they sit below PR #5's section in this file, no manual conflict.
+
+**Post-rebase HEAD SHA:** `dd68267c0606c58ae57fe33ff58a5de7d8d62142` (was `9487781`).
+- Commit 1 (Sprint α core): `59f498f` (was `74948d6`)
+- Commit 2 (SESSION-LOG follow-up): `dd68267` (was `9487781`)
+
+**Typecheck:** `pnpm --filter web typecheck` — exit 0 (clean).
+
+**Force-push:** `git push --force-with-lease origin sprint-alpha-sweet-cheap-win-2026-05-14` — pending below.
+
+**GitHub mergeStateStatus after force-push:** pending below.
+
+---
+
 # SESSION-LOG — Async UX Hardening Agent
 
 **Identity:** Async UX Hardening Agent (Sonnet)
