@@ -375,4 +375,46 @@ Per PRD F3: `lib/tools/{grants,nonprofit,usaspending,ca-grants,charity-navigator
 - Branch pushed to `origin/sprint-alpha-half-search-grants-2026-05-14`
 - PR is OPEN — not auto-merged, awaiting human coordination per `feedback_no_auto_merge_when_shared`.
 
+---
+
+# SESSION-LOG — Bug 3 alias `/dashboard/knowledge` → `/dashboard/memory`
+
+**Identity:** Sonnet coding agent (spawned by Lopmon)
+**Branch:** `bug-3-knowledge-memory-redirect-2026-05-14`
+**Worktree:** `C:/Users/Araly/edify-os-bug-3-alias`
+**Date:** 2026-05-14
+**Task:** Bug 3 from the routing cleanup backlog. Prior agent (2026-05-11
+Routing + Copy Cleanup) correctly paused: the sidebar already links
+"Knowledge Base" → `/dashboard/memory` (the working surface), so removing
+the sidebar entry would have been user-hostile. Minervamon's 2026-05-14
+call: add a server-side redirect page so stale `/dashboard/knowledge` URLs
+(typed guesses, old bookmarks) land cleanly on `/dashboard/memory` instead
+of 404'ing.
+
+## What shipped
+
+**`apps/web/src/app/dashboard/knowledge/page.tsx`** (new, 6 lines) — mirrors
+the existing redirect pattern at
+`apps/web/src/app/dashboard/settings/integrations/page.tsx`. Server-side
+`redirect("/dashboard/memory")` so there's no client flash and no 404.
+
+## Boundaries respected
+
+- Did NOT touch `apps/web/src/components/sidebar.tsx` (already correct — line
+  41 links `/dashboard/memory` with label "Knowledge Base").
+- Did NOT touch the `/dashboard/memory` route or page.
+- No middleware. No `next.config` edits.
+
+## Verification
+
+- `pnpm --filter web typecheck` — clean.
+- /simplify — no opportunities (file is 6 lines, mirrors an existing pattern).
+
+## Done
+
+- Commit SHA: `483238e`
+- PR URL: https://github.com/clm-studios/edify-os/pull/7
+- Branch pushed to `origin/bug-3-knowledge-memory-redirect-2026-05-14`
+- PR is OPEN — not auto-merged, awaiting human coordination per
+  `feedback_no_auto_merge_when_shared`.
 
