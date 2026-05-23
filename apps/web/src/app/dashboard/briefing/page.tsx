@@ -1,16 +1,20 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { ArrowLeft, ArrowRight, Check, SkipForward } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { ArrowLeft, ArrowRight, Check, Loader2, SkipForward } from 'lucide-react';
 import { Step1OrgProfile, type OrgProfileData } from './components/Step1OrgProfile';
 import { Step2Programs, newProgram, type ProgramsData } from './components/Step2Programs';
 import { Step3Goals, type GoalsData } from './components/Step3Goals';
 import { Step4Documents, type DocumentsData } from './components/Step4Documents';
-import { BriefingComplete } from './components/BriefingComplete';
 import { setOrgContext } from '@/lib/org-context';
+import { createClient } from '@/lib/supabase/client';
+
+// Cookie written after a successful /api/onboarding/complete — middleware reads
+// this to skip the briefing gate on subsequent dashboard visits.
+const BRIEFING_DONE_COOKIE = 'edify_briefing_done';
 
 const STORAGE_KEY = 'edify_briefing_draft';
-const COMPLETE_KEY = 'edify_briefing_completed';
 
 const STEPS = [
   { label: 'Organization', short: 'Org' },
@@ -45,16 +49,64 @@ const defaultDocuments: DocumentsData = {
 };
 
 export default function BriefingPage() {
+  const router = useRouter();
   const [step, setStep] = useState(0);
-  const [isComplete, setIsComplete] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // Hidden until the org-membership check resolves — prevents form flash for
+  // no-org users who will be redirected to /onboarding (F5 Option β).
+  const [checkingOrg, setCheckingOrg] = useState(true);
 
   const [orgProfile, setOrgProfile] = useState<OrgProfileData>(defaultOrgProfile);
   const [programs, setPrograms] = useState<ProgramsData>(makeDefaultPrograms);
   const [goals, setGoals] = useState<GoalsData>(defaultGoals);
   const [documents, setDocuments] = useState<DocumentsData>(defaultDocuments);
 
-  // Load draft from localStorage
+  // F5 Option β: On mount, verify the user has an org/member row.
+  // If orgId is null (user authenticated but never completed /onboarding),
+  // redirect to /onboarding before showing the briefing form.
+  // This prevents a no-org user from filling the 4-step form only to hit a
+  // 403 from /api/onboarding/complete. The form is hidden (checkingOrg=true)
+  // until the check resolves, so there's no form flash.
+  useEffect(() => {
+    async function checkOrgMembership() {
+      const supabase = createClient();
+      if (!supabase) {
+        // Supabase not configured (dev/mock mode) — skip check.
+        setCheckingOrg(false);
+        return;
+      }
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          // Not authenticated — middleware should have caught this; bail safely.
+          setCheckingOrg(false);
+          return;
+        }
+        const { data: member } = await supabase
+          .from('members')
+          .select('id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (!member) {
+          // No org row — route to /onboarding to create one first.
+          router.replace('/onboarding');
+          return;
+        }
+      } catch {
+        // On error, let the form render; the API will catch the 403 if needed.
+      }
+      setCheckingOrg(false);
+    }
+    checkOrgMembership();
+  }, [router]);
+
+  // Load draft from localStorage.
+  // Note: we no longer use the COMPLETE_KEY localStorage flag to auto-skip
+  // the form. If the user is on this page, they either haven't completed
+  // briefing (new user) or have existing localStorage context that needs to
+  // be persisted to the DB (F5 backfill). Either way the form should render,
+  // pre-populated from any saved draft, so the user can review and submit.
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -65,8 +117,6 @@ export default function BriefingPage() {
         if (parsed.goals) setGoals(parsed.goals);
         // Don't restore documents — file objects can't be serialized
       }
-      const completed = localStorage.getItem(COMPLETE_KEY);
-      if (completed === 'true') setIsComplete(true);
     } catch {
       // ignore
     }
@@ -86,8 +136,29 @@ export default function BriefingPage() {
 
   const handleFinish = async () => {
     setIsSaving(true);
+    setSaveError(null);
     try {
-      // Save org context to localStorage for injection into archetype system prompts
+      // Persist briefing to DB — creates org_profile memory entry + program/goal
+      // entries, marks onboarding_completed_at. Same write path for new users and
+      // for existing users whose briefing was previously localStorage-only (F5).
+      const res = await fetch('/api/onboarding/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orgProfile, programs, goals }),
+      });
+
+      // 409 = already completed — treat as success (idempotent).
+      if (!res.ok && res.status !== 409) {
+        const data = await res.json().catch(() => ({}));
+        console.error('[briefing] /api/onboarding/complete error:', data);
+        setSaveError(
+          data.error ?? 'Failed to save your briefing. Please try again.'
+        );
+        return;
+      }
+
+      // Second-layer durability: write to localStorage AFTER successful HTTP
+      // response so a server failure doesn't leave a false "complete" state.
       setOrgContext({
         orgName: orgProfile.orgName,
         missionStatement: orgProfile.missionStatement,
@@ -108,13 +179,15 @@ export default function BriefingPage() {
         goals: goals.selectedGoals,
         additionalContext: goals.additionalContext,
       });
+      // Set the middleware cookie so subsequent dashboard visits skip the
+      // briefing gate. 7-day TTL; sameSite=lax is fine for first-party nav.
+      document.cookie = `${BRIEFING_DONE_COOKIE}=true; path=/; max-age=${60 * 60 * 24 * 7}; samesite=lax`;
 
-      localStorage.setItem(COMPLETE_KEY, 'true');
-      setIsComplete(true);
-    } catch {
-      // Still mark complete locally even if save fails
-      localStorage.setItem(COMPLETE_KEY, 'true');
-      setIsComplete(true);
+      // Replace instead of push so briefing is not in the back-stack.
+      router.replace('/dashboard');
+    } catch (err) {
+      console.error('[briefing] Unexpected error in handleFinish:', err);
+      setSaveError('Something went wrong. Please try again.');
     } finally {
       setIsSaving(false);
     }
@@ -142,15 +215,10 @@ export default function BriefingPage() {
     }
   };
 
-  if (isComplete) {
+  if (checkingOrg) {
     return (
-      <div className="max-w-2xl mx-auto py-8 animate-fade-in">
-        <BriefingComplete
-          orgProfile={orgProfile}
-          programs={programs}
-          goals={goals}
-          documents={documents}
-        />
+      <div className="max-w-2xl mx-auto flex items-center justify-center py-24">
+        <Loader2 className="h-6 w-6 animate-spin text-brand-500" />
       </div>
     );
   }
@@ -226,6 +294,13 @@ export default function BriefingPage() {
         )}
         {step === 3 && (
           <Step4Documents data={documents} onChange={setDocuments} />
+        )}
+
+        {/* Save error */}
+        {saveError && (
+          <div className="mt-6 rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+            {saveError}
+          </div>
         )}
 
         {/* Navigation */}
