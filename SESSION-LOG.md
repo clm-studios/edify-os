@@ -586,3 +586,94 @@ the existing redirect pattern at
 - Branch pushed to `origin/bug-6-option-a-integrations-token-validate-2026-05-14`
 - PR is OPEN — not auto-merged, awaiting human coordination per `feedback_no_auto_merge_when_shared`.
 
+---
+
+# SESSION-LOG — Sprint A: Org Creation Onboarding Flow
+
+**Date:** 2026-05-23
+**Agent:** Sonnet coding agent spawned by Lopmon
+**Task:** Implement F1/F2/F3/F5 from `PRD-org-creation-onboarding-2026-05-15-revised.md` (Minervamon, v3). Close the org-creation gap outstanding since 2026-04-17.
+**Worktree:** `C:\Users\Araly\edify-os-sprint-a-onboarding`
+**Branch:** `lopmon/sprint-a-org-creation-onboarding`
+**Base:** `origin/main` @ `e5154f6`
+**PR:** https://github.com/clm-studios/edify-os/pull/9 (DRAFT — do not auto-merge)
+**Commit:** `3ee343bca1bce0f736154f1fb089715864adf3a5`
+**Status:** COMPLETE — all 4 in-scope features shipped, typecheck clean, /simplify run.
+
+---
+
+## Feature summary
+
+### What each feature does (confirmed before coding)
+
+**F1 — Middleware briefing gate:** Authenticated users hitting any `/dashboard/*` path (except `/dashboard/briefing` itself) without the `edify_briefing_done` cookie are redirected to `/dashboard/briefing`. Cookie is written client-side after successful briefing submission. No DB hit in Edge runtime — cookie is the perf mitigation the PRD called for.
+
+**F2 — Transactional org + memory write:** New `POST /api/onboarding/complete` route. Validates auth + org membership. Idempotency guard via `onboarding_completed_at`. Updates `orgs` with all briefing-form fields. Inserts `org_profile` preamble + per-program + goals memory entries. Returns `{ orgId, redirectTo: "/dashboard" }`. Client calls this from `handleFinish`, then sets localStorage (second-layer durability) and the cookie, then `router.replace('/dashboard')`.
+
+**F3 — Org profile preamble seeding:** `buildOrgPreamble()` in the API route assembles the structured org context string matching the PRD v3 template (no EIN, no signatory). Written to `memory_entries` as `category: org_profile`, `auto_generated: true`.
+
+**F5 — Silent backfill (Option B):** Same middleware gate and same API write path handle existing localStorage-only users. On first post-deploy login, they're redirected to `/dashboard/briefing`, see their draft pre-populated from localStorage, submit once, cookie is set. No special UI. Identical code path to new users — no branching.
+
+**F4 — Skipped per product decision.**
+**Documents DB persistence — Deferred to Sprint A.5 per product decision.**
+
+---
+
+## Architecture decisions made (with reasoning)
+
+**Cookie vs. DB in middleware:** `getAuthContext()` uses `next/headers` `cookies()` which is not Edge-compatible and adds a DB round-trip per request. Cookie-based fast path is the correct solution. Documented in middleware comment.
+
+**`/onboarding` legacy comment cleanup:** Confirmed `/onboarding` IS a live route (creates org + Anthropic key for brand-new users). The "historical intent" comment was stale in the sense that the route IS the working implementation. Comment was trimmed to remove the false "historical intent" framing. Route remains in `PROTECTED_PREFIXES` — correct.
+
+**No Supabase RPC for atomicity:** Supabase JS client doesn't expose raw BEGIN/COMMIT in Edge routes. Used sequential inserts with the existing service-role-client pattern (same as `/api/org/create`). Memory insert failure is non-fatal (org was already updated; memory can be re-created from settings). This matches the PRD's acceptable partial-success note.
+
+**`isComplete` state removed:** With `router.replace('/dashboard')` on success, the `BriefingComplete` component branch was unreachable. Removed to avoid dead state. `BriefingComplete` component itself left in place (used by settings/other flows if any).
+
+---
+
+## Schema verification findings
+
+- `orgs` table: missing `annual_budget`, `full_time_staff`, `regular_volunteers`, `org_type`, `primary_service_area`, `founded_year`. Migration 00037 adds them.
+- `members` table: `role` enum includes `'admin'` (confirmed in 00001_core_tenancy.sql). No change needed.
+- `memory_entries`: `org_profile` category not in constraint. Migration 00037 adds it.
+- `getAuthContext()`: confirmed in `apps/web/src/lib/supabase/server.ts`. Returns `{ user, orgId, memberId }`. `orgId: null` when no member row. Edge-incompatible — confirmed reason for cookie approach.
+- `/onboarding` route: LIVE at `apps/web/src/app/(auth)/onboarding/page.tsx`. Not dead code.
+
+---
+
+## Files changed
+
+- `apps/web/src/middleware.ts` — F1 briefing gate (~25 LOC added)
+- `apps/web/src/app/dashboard/briefing/page.tsx` — F2 client: API call, cookie set, router.replace, error state, localStorage-no-longer-gates-form-render
+- `apps/web/src/app/api/onboarding/complete/route.ts` — F2/F3 server: new route (~180 LOC)
+- `supabase/migrations/00037_briefing_org_fields.sql` — schema: 6 new orgs columns + org_profile category
+- `SESSION-LOG.md` — this log
+
+Total: 4 source files changed, 1 new file, 1 migration.
+
+---
+
+## /simplify pass findings and fixes
+
+1. **Redundant `/onboarding` in `BRIEFING_EXEMPT_PREFIXES`** — removed. `/onboarding` paths never match `pathname.startsWith("/dashboard")` so the exemption was a no-op.
+2. **Redundant `!isDemoMode` in F1 gate** — removed. Demo mode with a `/dashboard/*` path already returns early at the `if (isDemoMode && isProtected)` block above; the second check was unreachable.
+3. **Middleware comment over-explained** — trimmed the F1 block comment from ~15 lines to 8. Retained the non-obvious WHY (Edge runtime, cookie rationale, F5 backfill intent).
+4. **No new code reuse issues found** — `buildGoalsContent` in the new route is similar to logic in `/api/briefing/route.ts`, but both are simple enough that extraction into a shared helper adds indirection without benefit.
+
+---
+
+## Blockers / follow-ups for Lopmon
+
+- **Migration 00037 must be applied manually before deploy.** Run `supabase/migrations/00037_briefing_org_fields.sql` in Supabase SQL Editor. Same workflow as 00033/00036.
+- **Sprint A.5 — Documents DB persistence.** The briefing form accepts file uploads (calls `/api/briefing/upload`) but files are not persisted to Supabase Storage. Scoped out per product decision.
+- **Cookie expiry handling.** `edify_briefing_done` TTL is 7 days. After expiry, user is re-gated to briefing and sees 409 (already complete) from the API — treated as success and cookie is reset. Smooth, but worth a manual smoke test post-deploy.
+- **Existing `POST /api/briefing` route** at `apps/web/src/app/api/briefing/route.ts` still exists and is separate from the new `/api/onboarding/complete`. The old route updates org name/mission + writes program/goal memories but does NOT set `onboarding_completed_at` or write the `org_profile` preamble. It may be called from Settings (briefing re-run). This is NOT a conflict — the routes serve different purposes. Lopmon may want to audit for redundancy in a future sprint.
+
+---
+
+## Notes
+
+- PR target confirmed: `clm-studios/edify-os` `main` (not `whitmorelabs`).
+- PR is DRAFT. Citlali / Minervamon to eyes-on before merge.
+- `pnpm --filter web typecheck` passes (clean, no errors).
+
