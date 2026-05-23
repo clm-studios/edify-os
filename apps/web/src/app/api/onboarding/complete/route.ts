@@ -4,19 +4,28 @@ import { createServiceRoleClient, getAuthContext } from '@/lib/supabase/server';
 /**
  * POST /api/onboarding/complete
  *
- * Transactionally persists the briefing-form payload and seeds org memory.
+ * Persists the briefing-form payload and seeds org memory.
  * Called from /dashboard/briefing on final step submission.
  *
- * Accepts users who have an org (authenticated via /onboarding) but have not
- * yet completed the briefing (onboarding_completed_at is null). This is the
- * same write path for both brand-new users and existing users whose briefing
- * was previously localStorage-only (F5 silent backfill — same handler, no
- * special casing needed).
+ * Write order (sequential, NOT wrapped in a Postgres transaction — Supabase JS
+ * client does not expose raw BEGIN/COMMIT in Edge routes):
+ *   1. UPDATE orgs — sets briefing fields + onboarding_completed_at.
+ *   2. INSERT memory_entries (bulk) — org_profile preamble + per-program
+ *      entries + goals entry.
+ * Partial success is acceptable per PRD: if the memory insert fails, the org
+ * update already succeeded and the preamble can be re-created from settings.
+ * Step 2 failure logs an error but does NOT block the 200 response.
+ *
+ * Accepts users who have an org row (created via /onboarding) but have not yet
+ * completed the briefing (onboarding_completed_at is null). This is the same
+ * write path for new users and for existing users whose briefing was
+ * previously localStorage-only (F5 silent backfill — no special casing needed).
  *
  * Guards:
- * - Rejects unauthenticated requests (no user).
- * - Rejects requests from users with no org membership (must complete
- *   /onboarding first to get an org + member row).
+ * - Rejects unauthenticated requests (401).
+ * - Rejects requests from users with no org/member row (403) — those users
+ *   must visit /onboarding first to create the org. The /dashboard/briefing
+ *   page prevents reaching this state via a mount-time org check (Option β).
  * - Idempotent: if onboarding_completed_at is already set, returns 409 with
  *   the existing orgId so the client can redirect cleanly.
  *
@@ -107,11 +116,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'orgName is required' }, { status: 400 });
   }
 
-  // 4. Transactional write — org update + memory entries in one RPC call.
-  // Supabase JS client doesn't expose raw BEGIN/COMMIT, so we use a Postgres
-  // function via rpc() for atomicity. Since we don't have a pre-existing
-  // RPC for this, we use the service-role client's sequential inserts with
-  // manual rollback on failure — same pattern as /api/org/create.
+  // 4. Sequential write — org update then memory entries.
+  // See docstring for partial-success semantics.
   //
   // Step 4a: Update org with briefing fields.
   const completedAt = new Date().toISOString();

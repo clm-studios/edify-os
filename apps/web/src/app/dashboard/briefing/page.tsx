@@ -8,13 +8,13 @@ import { Step2Programs, newProgram, type ProgramsData } from './components/Step2
 import { Step3Goals, type GoalsData } from './components/Step3Goals';
 import { Step4Documents, type DocumentsData } from './components/Step4Documents';
 import { setOrgContext } from '@/lib/org-context';
+import { createClient } from '@/lib/supabase/client';
 
 // Cookie written after a successful /api/onboarding/complete — middleware reads
 // this to skip the briefing gate on subsequent dashboard visits.
 const BRIEFING_DONE_COOKIE = 'edify_briefing_done';
 
 const STORAGE_KEY = 'edify_briefing_draft';
-const COMPLETE_KEY = 'edify_briefing_completed';
 
 const STEPS = [
   { label: 'Organization', short: 'Org' },
@@ -53,11 +53,53 @@ export default function BriefingPage() {
   const [step, setStep] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // F5 Option β: tracks whether the org-membership check on mount has resolved.
+  // Stays true until we confirm the user has an org (or redirect them to /onboarding).
+  const [checkingOrg, setCheckingOrg] = useState(true);
 
   const [orgProfile, setOrgProfile] = useState<OrgProfileData>(defaultOrgProfile);
   const [programs, setPrograms] = useState<ProgramsData>(makeDefaultPrograms);
   const [goals, setGoals] = useState<GoalsData>(defaultGoals);
   const [documents, setDocuments] = useState<DocumentsData>(defaultDocuments);
+
+  // F5 Option β: On mount, verify the user has an org/member row.
+  // If orgId is null (user authenticated but never completed /onboarding),
+  // redirect to /onboarding before showing the briefing form.
+  // This prevents a no-org user from filling the 4-step form only to hit a
+  // 403 from /api/onboarding/complete. The form is hidden (checkingOrg=true)
+  // until the check resolves, so there's no form flash.
+  useEffect(() => {
+    async function checkOrgMembership() {
+      const supabase = createClient();
+      if (!supabase) {
+        // Supabase not configured (dev/mock mode) — skip check.
+        setCheckingOrg(false);
+        return;
+      }
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          // Not authenticated — middleware should have caught this; bail safely.
+          setCheckingOrg(false);
+          return;
+        }
+        const { data: member } = await supabase
+          .from('members')
+          .select('id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (!member) {
+          // No org row — route to /onboarding to create one first.
+          router.replace('/onboarding');
+          return;
+        }
+      } catch {
+        // On error, let the form render; the API will catch the 403 if needed.
+      }
+      setCheckingOrg(false);
+    }
+    checkOrgMembership();
+  }, [router]);
 
   // Load draft from localStorage.
   // Note: we no longer use the COMPLETE_KEY localStorage flag to auto-skip
@@ -137,8 +179,6 @@ export default function BriefingPage() {
         goals: goals.selectedGoals,
         additionalContext: goals.additionalContext,
       });
-      localStorage.setItem(COMPLETE_KEY, 'true');
-
       // Set the middleware cookie so subsequent dashboard visits skip the
       // briefing gate. 7-day TTL; sameSite=lax is fine for first-party nav.
       document.cookie = `${BRIEFING_DONE_COOKIE}=true; path=/; max-age=${60 * 60 * 24 * 7}; samesite=lax`;
@@ -174,6 +214,16 @@ export default function BriefingPage() {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
+
+  // Hold render until the org-membership check resolves to prevent a flash
+  // of the briefing form for users who will be redirected to /onboarding.
+  if (checkingOrg) {
+    return (
+      <div className="max-w-2xl mx-auto flex items-center justify-center py-24">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-2xl mx-auto animate-fade-in">
