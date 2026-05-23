@@ -677,3 +677,92 @@ Total: 4 source files changed, 1 new file, 1 migration.
 - PR is DRAFT. Citlali / Minervamon to eyes-on before merge.
 - `pnpm --filter web typecheck` passes (clean, no errors).
 
+
+---
+
+# SESSION-LOG — Sprint A: PR #9 Review Fixes (Minervamon feedback)
+
+**Date:** 2026-05-23
+**Agent:** Sonnet coding agent (spawned by Lopmon)
+**Task:** Address Minervamon's three review findings on PR #9 before merge.
+**Worktree:** `C:\Users\Araly\edify-os-sprint-a-onboarding`
+**Branch:** `lopmon/sprint-a-org-creation-onboarding`
+**PR:** https://github.com/clm-studios/edify-os/pull/9 (DRAFT — do not auto-merge)
+**Commits:** `54b9f98` (fixes), `6dd0b38` (/simplify)
+**Status:** COMPLETE — all three findings addressed, typecheck clean, /simplify run, pushed.
+
+---
+
+## (1) Schema verification — onboarding_completed_at
+
+Independent grep confirmed: `onboarding_completed_at timestamptz` exists at
+`supabase/migrations/00001_core_tenancy.sql:15`. No migration needed.
+Lopmon's pre-spawn report was correct. Item pre-resolved.
+
+---
+
+## (2) F5 scope fix — Option β chosen
+
+**Finding:** Users with no org/member row (authenticated but never visited
+`/onboarding`) would be routed to `/dashboard/briefing` by middleware, fill the
+4-step form, submit, and hit a 403 from `/api/onboarding/complete`.
+
+**Fix — Option β (briefing-page mount check):**
+
+`apps/web/src/app/dashboard/briefing/page.tsx` gains a `useEffect` on mount
+that uses the Supabase browser client to `auth.getUser()` then query `members`
+for the user's row. If no member row → `router.replace('/onboarding')`. The
+form is hidden behind a `checkingOrg` loading state (Loader2 spinner) until the
+check resolves. No form flash for no-org users.
+
+On Supabase absent (dev/mock) or any check error → falls through to form render
+(safe; the API's 403 is the last line of defense).
+
+**Why Option β over α and γ:**
+
+- Option α (middleware DB hit): adds a DB round-trip on every request.
+  The cookie approach was chosen to avoid this.
+- Option γ (API redirect): user fills all 4 steps before discovering they can't
+  submit — worst UX.
+- Option β: one members query on briefing page load only, zero middleware impact,
+  form never shown to no-org users.
+
+---
+
+## (3) Docstring inaccuracy — fixed
+
+`apps/web/src/app/api/onboarding/complete/route.ts` docstring now accurately
+describes sequential write with PRD-accepted partial-success semantics. Removed
+false "transactional write with manual rollback" claim. Also updated inline
+comment at the write step (step 4).
+
+---
+
+## (4) Dead code — removed
+
+Removed `const COMPLETE_KEY = 'edify_briefing_completed'` and its only
+`localStorage.setItem(COMPLETE_KEY, 'true')` call from `briefing/page.tsx`.
+`BriefingComplete` import was already absent (previous agent removed it).
+
+---
+
+## /simplify findings and fixes
+
+1. Spinner reuse — replaced hand-rolled CSS spinner with `Loader2` from
+   lucide-react (already used in Step4Documents.tsx in same subtree).
+2. Trimmed `checkingOrg` state comment to WHY only.
+3. No other issues found.
+
+---
+
+## Files changed
+
+- `apps/web/src/app/api/onboarding/complete/route.ts` — docstring + inline comment
+- `apps/web/src/app/dashboard/briefing/page.tsx` — F5 Option β + dead code + spinner reuse
+
+---
+
+## Notes
+
+- PR is DRAFT. No auto-merge. Awaiting Minervamon/Citlali eyes-on + migration 00037 apply.
+- No new migrations in this fix-pass.
