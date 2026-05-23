@@ -9,9 +9,9 @@ import { ToastNotification } from '@/components/notifications/ToastNotification'
 import { CommandPalette } from '@/components/CommandPalette';
 
 /**
- * Client-side shell for every /dashboard/* page.
- * Extracted from layout.tsx so that layout.tsx can be a Server Component
- * and run server-side auth/org guards before rendering this shell.
+ * Client-side shell rendered on every /dashboard/* page.
+ * Provides the sidebar, notification/support providers, and global widgets.
+ * Kept separate from layout.tsx so the layout can be a Server Component.
  */
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   return (
