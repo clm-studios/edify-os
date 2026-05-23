@@ -1,0 +1,38 @@
+'use client';
+
+import { Sidebar } from '@/components/sidebar';
+import { SupportChatProvider } from '@/components/support/ChatProvider';
+import { ChatWidget } from '@/components/support/ChatWidget';
+import { ProactiveHelper } from '@/components/support/ProactiveHelper';
+import { NotificationProvider } from '@/components/notifications/NotificationProvider';
+import { ToastNotification } from '@/components/notifications/ToastNotification';
+import { CommandPalette } from '@/components/CommandPalette';
+
+/**
+ * Client-side shell for every /dashboard/* page.
+ * Extracted from layout.tsx so that layout.tsx can be a Server Component
+ * and run server-side auth/org guards before rendering this shell.
+ */
+export function DashboardShell({ children }: { children: React.ReactNode }) {
+  return (
+    <NotificationProvider>
+      <SupportChatProvider>
+        <div className="flex h-screen overflow-hidden bg-gray-50 text-fg-1">
+          <Sidebar />
+          <main className="flex-1 min-w-0 overflow-y-auto bg-gray-50 pt-14 lg:pt-0">
+            <div className="w-full max-w-[1280px] mx-auto px-6 py-8 lg:px-10 lg:py-10">
+              {children}
+            </div>
+          </main>
+        </div>
+        {/* Support chat widget -- visible on all dashboard pages */}
+        <ChatWidget />
+        <ProactiveHelper />
+        {/* Real-time toast alerts */}
+        <ToastNotification />
+        {/* Cmd+K command palette -- available on every dashboard page */}
+        <CommandPalette />
+      </SupportChatProvider>
+    </NotificationProvider>
+  );
+}
