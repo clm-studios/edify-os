@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, ArrowRight, Check, SkipForward } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Loader2, SkipForward } from 'lucide-react';
 import { Step1OrgProfile, type OrgProfileData } from './components/Step1OrgProfile';
 import { Step2Programs, newProgram, type ProgramsData } from './components/Step2Programs';
 import { Step3Goals, type GoalsData } from './components/Step3Goals';
@@ -53,8 +53,8 @@ export default function BriefingPage() {
   const [step, setStep] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  // F5 Option β: tracks whether the org-membership check on mount has resolved.
-  // Stays true until we confirm the user has an org (or redirect them to /onboarding).
+  // Hidden until the org-membership check resolves — prevents form flash for
+  // no-org users who will be redirected to /onboarding (F5 Option β).
   const [checkingOrg, setCheckingOrg] = useState(true);
 
   const [orgProfile, setOrgProfile] = useState<OrgProfileData>(defaultOrgProfile);
@@ -215,12 +215,10 @@ export default function BriefingPage() {
     }
   };
 
-  // Hold render until the org-membership check resolves to prevent a flash
-  // of the briefing form for users who will be redirected to /onboarding.
   if (checkingOrg) {
     return (
       <div className="max-w-2xl mx-auto flex items-center justify-center py-24">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
+        <Loader2 className="h-6 w-6 animate-spin text-brand-500" />
       </div>
     );
   }
