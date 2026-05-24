@@ -21,6 +21,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import Anthropic from "@anthropic-ai/sdk";
+import { decryptIfEncrypted, CRYPTO_LABEL_ANTHROPIC_KEY } from "@/lib/crypto";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -66,6 +67,17 @@ interface MemoryEntryInsert {
   auto_generated: boolean;
   created_by: null;
 }
+
+// ---------------------------------------------------------------------------
+// Shared constants
+// ---------------------------------------------------------------------------
+
+/** Supabase Storage bucket for org documents. Created by migration 00038. */
+export const ORG_DOCUMENTS_BUCKET = "org-documents";
+
+/** Proof library memory categories supported in Sprint A.5. */
+export const PROOF_LIBRARY_CATEGORIES = ["prior_grants", "outcomes", "voice_samples"] as const;
+export type ProofLibraryCategoryKey = (typeof PROOF_LIBRARY_CATEGORIES)[number];
 
 // ---------------------------------------------------------------------------
 // Routing table: document category → target memory categories + archetype hint
@@ -306,12 +318,12 @@ async function extractSingleDocument(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   serviceClient: SupabaseClient<any>,
   doc: DocumentRow,
-  anthropicApiKey: string
+  anthropic: Anthropic
 ): Promise<SingleDocExtractionResult> {
   // 1. Get routing config
   const routing = EXTRACTION_ROUTING[doc.category] ?? EXTRACTION_ROUTING.other;
   const targetCategories = routing.memoryCategories.filter((c) =>
-    ["prior_grants", "outcomes", "voice_samples"].includes(c)
+    (PROOF_LIBRARY_CATEGORIES as readonly string[]).includes(c)
   );
 
   if (targetCategories.length === 0) {
@@ -330,7 +342,7 @@ async function extractSingleDocument(
   }
 
   const { data: fileData, error: downloadError } = await serviceClient.storage
-    .from("org-documents")
+    .from(ORG_DOCUMENTS_BUCKET)
     .download(doc.storage_path);
 
   if (downloadError || !fileData) {
@@ -368,8 +380,6 @@ async function extractSingleDocument(
 
   // 4. Call Claude for structured extraction
   const prompt = buildExtractionPrompt(rawText, targetCategories, doc.file_name);
-  const anthropic = new Anthropic({ apiKey: anthropicApiKey });
-
   let responseText: string;
   try {
     const response = await anthropic.messages.create({
@@ -428,7 +438,7 @@ async function extractSingleDocument(
         e.category &&
         e.title?.trim() &&
         e.content?.trim() &&
-        ["prior_grants", "outcomes", "voice_samples"].includes(e.category)
+        (PROOF_LIBRARY_CATEGORIES as readonly string[]).includes(e.category)
       );
     })
     .map((e) => ({
@@ -467,6 +477,8 @@ export async function extractPendingDocuments(
   const { maxDocs = 50, timeoutMs = 55_000, dryRun = false, orgId } = options;
   const startTime = Date.now();
   const result: ExtractionResult = { processed: 0, failed: 0, skipped: 0 };
+  // Construct the Anthropic client once, reuse across all documents in this run.
+  const anthropic = new Anthropic({ apiKey: anthropicApiKey });
 
   // Query: pending docs that are due for (re)processing
   // "Due" = (retry_count < 3) AND (never attempted OR last attempted > 1 hour ago)
@@ -497,7 +509,7 @@ export async function extractPendingDocuments(
   for (const doc of docs as DocumentRow[]) {
     // Check soft timeout
     if (Date.now() - startTime > timeoutMs) {
-      result.skipped += docs.length - result.processed - result.failed - result.skipped;
+      result.skipped = docs.length - result.processed - result.failed;
       break;
     }
 
@@ -513,7 +525,7 @@ export async function extractPendingDocuments(
     }
 
     try {
-      const extraction = await extractSingleDocument(serviceClient, doc, anthropicApiKey);
+      const extraction = await extractSingleDocument(serviceClient, doc, anthropic);
 
       if (dryRun) {
         console.log(`[proof-library/extract][dryRun] doc=${doc.id} entries=${extraction.entries.length}`);
@@ -595,4 +607,35 @@ export async function extractPendingDocuments(
   }
 
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Shared helper — used by both trigger paths (cron sweeper + onboarding route)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch and decrypt an org's Anthropic API key from the DB.
+ * Returns null if not set or decryption fails.
+ */
+export async function resolveOrgAnthropicKey(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  serviceClient: SupabaseClient<any>,
+  orgId: string
+): Promise<string | null> {
+  const { data: org } = await serviceClient
+    .from("orgs")
+    .select("anthropic_api_key_encrypted")
+    .eq("id", orgId)
+    .single();
+
+  if (!org?.anthropic_api_key_encrypted) return null;
+
+  try {
+    return decryptIfEncrypted(
+      org.anthropic_api_key_encrypted as string,
+      CRYPTO_LABEL_ANTHROPIC_KEY
+    );
+  } catch {
+    return null;
+  }
 }

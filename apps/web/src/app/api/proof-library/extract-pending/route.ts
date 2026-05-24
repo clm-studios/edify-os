@@ -22,9 +22,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient, getAuthContext } from "@/lib/supabase/server";
-import { extractPendingDocuments } from "@/lib/proof-library/extract";
-import { decryptIfEncrypted, CRYPTO_LABEL_ANTHROPIC_KEY } from "@/lib/crypto";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { extractPendingDocuments, resolveOrgAnthropicKey } from "@/lib/proof-library/extract";
 
 // Give the sweeper enough time to process multiple documents.
 export const maxDuration = 60;
@@ -56,14 +54,10 @@ export async function POST(req: NextRequest) {
 
   // Parse optional orgId from body (cron sweeps all; user scopes to their org)
   let targetOrgId: string | null = requestingOrgId;
-  try {
-    const body = await req.json().catch(() => ({}));
-    // Only allow overriding orgId for cron calls
-    if (isCronCall && typeof body.orgId === "string" && body.orgId.trim()) {
-      targetOrgId = body.orgId.trim();
-    }
-  } catch {
-    // Ignore body parse errors
+  const body = await req.json().catch(() => ({}));
+  // Only allow overriding orgId for cron calls
+  if (isCronCall && typeof body.orgId === "string" && body.orgId.trim()) {
+    targetOrgId = body.orgId.trim();
   }
 
   // ---------------------------------------------------------------------------
@@ -100,8 +94,16 @@ export async function POST(req: NextRequest) {
     const summary: Record<string, { processed: number; failed: number; skipped: number }> = {};
     let totalProcessed = 0;
     let totalFailed = 0;
+    // Process at most 5 orgs per sweep to stay within the 60s function limit.
+    // Remaining orgs will be picked up on the next cron cycle.
+    const sweepStartTime = Date.now();
 
     for (const orgId of orgIds) {
+      // Abort if we're approaching the 60s function limit (50s soft ceiling).
+      if (Date.now() - sweepStartTime > 50_000) {
+        console.warn("[proof-library/extract-pending] Approaching function timeout — stopping sweep early");
+        break;
+      }
       const apiKey = await resolveOrgAnthropicKey(serviceClient, orgId);
       if (!apiKey) {
         console.warn(`[proof-library/extract-pending] Org ${orgId} has no Anthropic key — skipping`);
@@ -157,29 +159,3 @@ export async function POST(req: NextRequest) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Helper
-// ---------------------------------------------------------------------------
-
-async function resolveOrgAnthropicKey(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  serviceClient: SupabaseClient<any>,
-  orgId: string
-): Promise<string | null> {
-  const { data: org } = await serviceClient
-    .from("orgs")
-    .select("anthropic_api_key_encrypted")
-    .eq("id", orgId)
-    .single();
-
-  if (!org?.anthropic_api_key_encrypted) return null;
-
-  try {
-    return decryptIfEncrypted(
-      org.anthropic_api_key_encrypted as string,
-      CRYPTO_LABEL_ANTHROPIC_KEY
-    );
-  } catch {
-    return null;
-  }
-}

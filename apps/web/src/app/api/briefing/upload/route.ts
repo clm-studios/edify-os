@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceRoleClient, getAuthContext } from '@/lib/supabase/server';
-
-// Storage bucket for org documents (created by migration 00038).
-// Path scheme: <orgId>/<docId>/<original_filename>
-const ORG_DOCUMENTS_BUCKET = 'org-documents';
+import { ORG_DOCUMENTS_BUCKET } from '@/lib/proof-library/extract';
 
 // Demo-mode guard: when NEXT_PUBLIC_DEMO_MODE=true, skip Storage upload
 // and return a synthetic success. Matches the pattern in middleware.ts.
@@ -93,8 +90,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Database not configured' }, { status: 503 });
     }
 
-    // Step 1: Insert documents row to get a stable docId before Storage upload.
-    // We insert first so the Storage path can embed the docId.
+    // Insert documents row first so the Storage path can embed the docId.
     const { data: doc, error: docError } = await serviceClient
       .from('documents')
       .insert({
@@ -122,9 +118,7 @@ export async function POST(req: NextRequest) {
 
     const docId = doc.id;
 
-    // Step 2: Upload file bytes to Supabase Storage.
-    // Path: <orgId>/<docId>/<filename> — isolates per-tenant, prevents collisions.
-    // Mirrors the persistRenderedPng pattern in lib/tools/render.ts.
+    // Upload to Storage at <orgId>/<docId>/<filename> — mirrors persistRenderedPng pattern.
     const fileBuffer = Buffer.from(await file.arrayBuffer());
     const storagePath = `${orgId}/${docId}/${file.name}`;
 
@@ -146,7 +140,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Step 3: Update documents row with the confirmed storage_path.
+    // Update documents row with the confirmed storage_path.
     const { error: updateError } = await serviceClient
       .from('documents')
       .update({ storage_path: storagePath })

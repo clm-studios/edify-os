@@ -17,6 +17,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getMemoryByCategory } from "@/lib/memory/get-by-category";
+import { PROOF_LIBRARY_CATEGORIES } from "@/lib/proof-library/extract";
 
 // ---------------------------------------------------------------------------
 // System-prompt addendum
@@ -93,9 +94,9 @@ export async function executeOrgMemoryTool({
   }
 
   const category = input.category as string | undefined;
-  if (!category || !["prior_grants", "outcomes", "voice_samples"].includes(category)) {
+  if (!category || !(PROOF_LIBRARY_CATEGORIES as readonly string[]).includes(category)) {
     return {
-      content: "category is required and must be one of: prior_grants, outcomes, voice_samples",
+      content: `category is required and must be one of: ${PROOF_LIBRARY_CATEGORIES.join(", ")}`,
       is_error: true,
     };
   }

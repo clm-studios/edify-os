@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceRoleClient, getAuthContext } from '@/lib/supabase/server';
-import { extractPendingDocuments } from '@/lib/proof-library/extract';
-import { decryptIfEncrypted, CRYPTO_LABEL_ANTHROPIC_KEY } from '@/lib/crypto';
+import { extractPendingDocuments, resolveOrgAnthropicKey } from '@/lib/proof-library/extract';
 
 /**
  * POST /api/onboarding/complete
@@ -251,19 +250,7 @@ export async function POST(req: NextRequest) {
   let extractionResult: { processed: number; failed: number; skipped: number } | null = null;
 
   try {
-    // Get org's Anthropic API key for extraction
-    const { data: orgData } = await serviceClient
-      .from('orgs')
-      .select('anthropic_api_key_encrypted')
-      .eq('id', orgId)
-      .single();
-
-    const apiKey = orgData?.anthropic_api_key_encrypted
-      ? decryptIfEncrypted(
-          orgData.anthropic_api_key_encrypted as string,
-          CRYPTO_LABEL_ANTHROPIC_KEY
-        )
-      : null;
+    const apiKey = await resolveOrgAnthropicKey(serviceClient, orgId);
 
     if (apiKey) {
       // Cap at 5 docs so a large briefing upload doesn't block indefinitely.
