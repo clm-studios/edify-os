@@ -172,6 +172,7 @@ export default function OnboardingPage() {
               placeholder="Hope Community Foundation"
               required
               disabled={submitting}
+              autoComplete="off"
               className="w-full rounded-lg border border-white/10 bg-white/5 px-3.5 py-2.5 pl-10 text-sm text-white placeholder:text-white/25 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 transition-colors disabled:opacity-50"
             />
           </div>
@@ -191,6 +192,7 @@ export default function OnboardingPage() {
               placeholder="sk-ant-api03-..."
               required
               disabled={submitting}
+              autoComplete="new-password"
               className="w-full rounded-lg border border-white/10 bg-white/5 px-3.5 py-2.5 pl-10 font-mono text-sm text-white placeholder:text-white/25 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 transition-colors disabled:opacity-50"
             />
           </div>

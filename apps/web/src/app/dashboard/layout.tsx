@@ -1,37 +1,57 @@
-'use client';
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
+import { getAuthContext } from '@/lib/supabase/server';
+import { DashboardShell } from './dashboard-shell';
 
-import { Sidebar } from '@/components/sidebar';
-import { SupportChatProvider } from '@/components/support/ChatProvider';
-import { ChatWidget } from '@/components/support/ChatWidget';
-import { ProactiveHelper } from '@/components/support/ProactiveHelper';
-import { NotificationProvider } from '@/components/notifications/NotificationProvider';
-import { ToastNotification } from '@/components/notifications/ToastNotification';
-import { CommandPalette } from '@/components/CommandPalette';
-
-export default function DashboardLayout({
+/**
+ * /dashboard/* layout — Server Component.
+ *
+ * Guard rules (evaluated server-side on every dashboard route):
+ *   1. Demo mode (NEXT_PUBLIC_DEMO_MODE=true + edify_demo cookie) → bypass all
+ *      DB checks. Demo users have no real Supabase session.
+ *   2. Supabase not configured (dev/mock) → bypass guard; middleware handles
+ *      auth for real deployments.
+ *   3. !user → redirect /login
+ *   4. user && !orgId → redirect /onboarding
+ *
+ * Closes two bugs with one fix:
+ *   - F1 gap: org-less users with edify_briefing_done cookie could reach
+ *     /dashboard directly, bypassing the middleware's cookie gate.
+ *   - Logged-out users could render the shell when middleware's Edge session
+ *     check misfired.
+ *
+ * The client-side org check in /dashboard/briefing/page.tsx is kept as
+ * belt-and-suspenders against future regressions of this guard.
+ */
+export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return (
-    <NotificationProvider>
-      <SupportChatProvider>
-        <div className="flex h-screen overflow-hidden bg-gray-50 text-fg-1">
-          <Sidebar />
-          <main className="flex-1 min-w-0 overflow-y-auto bg-gray-50 pt-14 lg:pt-0">
-            <div className="w-full max-w-[1280px] mx-auto px-6 py-8 lg:px-10 lg:py-10">
-              {children}
-            </div>
-          </main>
-        </div>
-        {/* Support chat widget -- visible on all dashboard pages */}
-        <ChatWidget />
-        <ProactiveHelper />
-        {/* Real-time toast alerts */}
-        <ToastNotification />
-        {/* Cmd+K command palette -- available on every dashboard page */}
-        <CommandPalette />
-      </SupportChatProvider>
-    </NotificationProvider>
+  // Demo-mode bypass — mirrors middleware.ts logic.
+  // Must read cookies before getAuthContext to avoid an unnecessary DB call.
+  if (process.env.NEXT_PUBLIC_DEMO_MODE === 'true') {
+    const cookieStore = await cookies();
+    if (cookieStore.get('edify_demo')?.value === 'true') {
+      return <DashboardShell>{children}</DashboardShell>;
+    }
+  }
+
+  // getAuthContext returns { user: null, orgId: null } both when Supabase is
+  // not configured (dev/mock) and when the user is genuinely unauthenticated.
+  // Distinguish the two cases by checking whether SUPABASE_URL is set.
+  const supabaseConfigured = Boolean(
+    process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL
   );
+
+  if (!supabaseConfigured) {
+    return <DashboardShell>{children}</DashboardShell>;
+  }
+
+  const { user, orgId } = await getAuthContext();
+
+  if (!user) redirect('/login');
+  if (!orgId) redirect('/onboarding');
+
+  return <DashboardShell>{children}</DashboardShell>;
 }

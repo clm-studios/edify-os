@@ -766,3 +766,68 @@ Removed `const COMPLETE_KEY = 'edify_briefing_completed'` and its only
 
 - PR is DRAFT. No auto-merge. Awaiting Minervamon/Citlali eyes-on + migration 00037 apply.
 - No new migrations in this fix-pass.
+
+---
+
+# SESSION-LOG — fix(dashboard): F1 org-guard + onboarding autofill fixes
+
+**Identity:** Sonnet coding agent (spawned by Lopmon)
+**Branch:** `lopmon/fix-dashboard-org-guard-plus-autofill`
+**Worktree:** `C:\Users\Araly\edify-os-dashboard-org-guard`
+**Base:** `origin/main` @ `a3d8010` (Sprint A merged 2026-05-23)
+**Date:** 2026-05-23
+**Task:** Fix three issues from Minervamon's Sprint A smoke test on fresh +test1 no-org account
+
+---
+
+## What I built
+
+### Item 1 — Layout-level org-guard
+
+Converted `apps/web/src/app/dashboard/layout.tsx` from a `'use client'` component to a Server Component. Extracted client-side UI (Sidebar, providers, widgets) into new `apps/web/src/app/dashboard/dashboard-shell.tsx` client component.
+
+Guard logic (evaluated server-side on every `/dashboard/*` route):
+1. Demo mode bypass (`NEXT_PUBLIC_DEMO_MODE=true` + `edify_demo` cookie) → render shell without DB call
+2. Supabase not configured → render shell (dev/mock pass-through)
+3. `!user` → `redirect('/login')`
+4. `user && !orgId` → `redirect('/onboarding')`
+
+Closes two bugs: F1 org-guard gap on `/dashboard` itself, and logged-out shell render via Edge session misfires.
+
+### Item 2 — Onboarding autofill fixes
+
+`apps/web/src/app/(auth)/onboarding/page.tsx`:
+- Organization Name input: `autocomplete="off"` (stops Chrome email autofill)
+- Anthropic API key input: `autocomplete="new-password"` (defeats Chrome password autofill; keeps `type="password"` native masking)
+
+### Item 3 — Client-side org check
+
+Kept existing `useEffect` in `/dashboard/briefing/page.tsx`. Belt-and-suspenders. Documented decision in PR body and commit message.
+
+---
+
+## /simplify findings
+
+1. Dead code: unreachable `!user` guard after combined-null block → removed by restructuring to hoist `supabaseConfigured` check before `getAuthContext()` call
+2. Narration comments in `layout.tsx` → stripped; non-obvious WHY kept in JSDoc
+3. `dashboard-shell.tsx` JSDoc change-narration → replaced with present-state description
+
+---
+
+## Files changed
+
+| File | Change |
+|------|--------|
+| `apps/web/src/app/dashboard/layout.tsx` | Server Component with auth/org guard |
+| `apps/web/src/app/dashboard/dashboard-shell.tsx` | New — client-side shell |
+| `apps/web/src/app/(auth)/onboarding/page.tsx` | autocomplete attrs |
+
+---
+
+## Notes
+
+- TypeScript passes clean on both commits.
+- PR #10 is DRAFT: https://github.com/clm-studios/edify-os/pull/10
+- No auto-merge. Minervamon reviews before merge.
+- Performance note: every dashboard page request now hits two Supabase calls (auth.getUser + members query) server-side. New latency vs correctness tradeoff. Worth monitoring in Vercel logs post-merge.
+- No migrations needed.
