@@ -196,14 +196,10 @@ export async function runArchetypeTurn({
   // Block 1 (cache_control: ephemeral) is first; Block 2 (no cache_control) is second. ✓
   const stableSystemText = systemPrompt + orgContext + toolAddendums;
   const conditionalAddendums = skillsAddendum + frontendDesignAddendum;
+  const stableBlock = { type: "text" as const, text: stableSystemText, cache_control: { type: "ephemeral" as const } };
   const systemBlocks = conditionalAddendums
-    ? [
-        { type: "text" as const, text: stableSystemText, cache_control: { type: "ephemeral" as const } },
-        { type: "text" as const, text: conditionalAddendums },
-      ]
-    : [
-        { type: "text" as const, text: stableSystemText, cache_control: { type: "ephemeral" as const } },
-      ];
+    ? [stableBlock, { type: "text" as const, text: conditionalAddendums }]
+    : [stableBlock];
 
   // Fix #3 — Always include CODE_EXECUTION_TOOL unconditionally.
   //
@@ -381,8 +377,8 @@ export async function runArchetypeTurn({
 
     // Accumulate token usage from this API response
     // Fix #1 — also log per-round structured metrics for Vercel log filtering.
-    const roundDurationMs = Date.now() - roundStartMs;
     if (response.usage) {
+      const roundDurationMs = Date.now() - roundStartMs;
       tokenUsage.inputTokens += response.usage.input_tokens ?? 0;
       tokenUsage.outputTokens += response.usage.output_tokens ?? 0;
       // Cache token fields are present on BetaUsage (skills path) but not base Usage.
