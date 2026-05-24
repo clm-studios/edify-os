@@ -4,6 +4,23 @@ import { getAuthContext } from '@/lib/supabase/server';
 import { DashboardShell } from './dashboard-shell';
 
 /**
+ * Prevent browser and Vercel CDN from caching any /dashboard/* response.
+ *
+ * Without these, Next.js emits `Cache-Control: public, max-age=0, must-revalidate`
+ * which allows the Vercel edge to serve a `X-Vercel-Cache: HIT` response — and the
+ * browser can serve a stale "authorized" snapshot from disk cache (transferSize: 0,
+ * navType: 'navigate') without ever reaching the server-side guard below.
+ *
+ * `force-dynamic` sets `Cache-Control: no-store` on every response in this subtree.
+ * `revalidate = 0` is belt-and-suspenders for any ISR-adjacent path.
+ *
+ * These exports apply to the entire /dashboard/* subtree because Next.js propagates
+ * layout-level dynamic config to all child pages.
+ */
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+/**
  * /dashboard/* layout — Server Component.
  *
  * Guard rules (evaluated server-side on every dashboard route):
