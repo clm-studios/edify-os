@@ -4,17 +4,33 @@
  * Strategy:
  *   - App shell + static assets → cache-first (install-time pre-cache)
  *   - /api/* routes           → network-first (never serve stale API data)
+ *   - Auth-gated routes        → pass-through (never cached — security exclusion)
  *   - HTML navigation          → stale-while-revalidate (fast load, bg refresh)
  *   - Everything else          → network-first with cache fallback
+ *
+ * Auth-gated routes (/dashboard/*, /onboarding) are excluded entirely from SW
+ * caching. Stale authorized snapshots in Cache Storage are a security risk —
+ * they can be served to a browser that is no longer authenticated, bypassing
+ * server-side session guards. These routes have no meaningful offline value
+ * (stale dashboard data is misleading), so exclusion is the correct policy.
+ * See: Minervamon smoke test post-PR-#11 (2026-05-24).
  *
  * No offline form submission or background sync — out of scope for v1.
  */
 
-const CACHE_VERSION = "edify-pwa-v2";
+const CACHE_VERSION = "edify-pwa-v3";
+
+/**
+ * Routes that must NEVER be served from the SW cache.
+ * Any navigation or fetch request whose pathname starts with one of these
+ * prefixes passes straight through to the network — no cache read, no cache
+ * write. Bump CACHE_VERSION whenever this list changes so existing SW installs
+ * evict their stale Cache Storage on the next activate event.
+ */
+const AUTH_GATED_PREFIXES = ["/dashboard", "/onboarding"];
 
 const APP_SHELL = [
   "/",
-  "/dashboard",
   "/manifest.json",
   "/icon-192.png",
   "/icon-512.png",
@@ -54,6 +70,13 @@ self.addEventListener("fetch", (event) => {
 
   // Only handle same-origin requests
   if (url.origin !== self.location.origin) return;
+
+  // Auth-gated routes: pass-through — never read from or write to the cache.
+  // Serving a stale authenticated snapshot to a browser that may no longer be
+  // authorized would bypass the server-side session guards added in PRs #9–#11.
+  if (AUTH_GATED_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) {
+    return; // Let the browser handle the request natively (no event.respondWith)
+  }
 
   // API routes: network-first, no caching
   if (url.pathname.startsWith("/api/")) {
