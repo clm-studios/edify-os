@@ -831,3 +831,83 @@ Kept existing `useEffect` in `/dashboard/briefing/page.tsx`. Belt-and-suspenders
 - No auto-merge. Minervamon reviews before merge.
 - Performance note: every dashboard page request now hits two Supabase calls (auth.getUser + members query) server-side. New latency vs correctness tradeoff. Worth monitoring in Vercel logs post-merge.
 - No migrations needed.
+
+---
+
+# SESSION-LOG — fix(cache): Cache-Control: no-store on auth-gated routes
+
+**Identity:** Sonnet coding agent (spawned by Lopmon)
+**Branch:** `lopmon/fix-auth-routes-no-store`
+**Worktree:** `C:\Users\Araly\edify-os-no-store-cache`
+**Base:** `origin/main` @ `2fdf65d` (PR #10 merged 2026-05-23)
+**Date:** 2026-05-24
+**Task:** Add `Cache-Control: no-store` to auth-gated routes (`/dashboard/*` and `/onboarding`) to prevent browser and Vercel CDN from serving stale authorized snapshots.
+**PR:** https://github.com/clm-studios/edify-os/pull/11 (DRAFT — do not auto-merge)
+**Commit:** `8507b2b`
+**Status:** COMPLETE — 2 files changed, typecheck clean, /simplify run.
+
+---
+
+## Bug context
+
+Minervamon's smoke test of PR #10 found two caching issues:
+
+1. **`/dashboard` browser-cached.** Same-URL navigation served a stale authorized HTML snapshot (`transferSize: 0`, `navType: 'navigate'`) — the server-side guard in `dashboard/layout.tsx` never ran. Only novel URLs (`/dashboard?x=1`) or no-store requests reached the server.
+2. **`/onboarding` browser-cached.** A pre-PR-#10 version of the page was served (missing `autocomplete` attrs added in PR #10). Hard-refresh confirmed the deployed code was correct — the browser had served stale HTML.
+3. **Vercel CDN compounds it.** `X-Vercel-Cache: HIT` observed on responses. Next.js's default `Cache-Control: public, max-age=0, must-revalidate` is permissive enough for Vercel edge caching + browser disk cache reuse.
+
+---
+
+## Option chosen: A (force-dynamic + revalidate = 0)
+
+Added to `dashboard/layout.tsx` (subtree enforcement for all `/dashboard/*`) and `(auth)/onboarding/layout.tsx`:
+
+```ts
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+```
+
+**Why Option A over B/C:**
+- Option A is the canonical Next.js App Router declarative approach. Already used in this codebase at `apps/web/src/app/api/team/[slug]/chat/route.ts`.
+- Option B (explicit `next/headers` header writes) — more verbose, same effect, more surface area.
+- Option C (middleware) — couples cache policy to auth gating, harder to trace.
+
+`force-dynamic` causes Next.js to emit `Cache-Control: no-store` on all responses in the subtree. `revalidate = 0` is belt-and-suspenders for ISR-adjacent paths (documented in the comment as intentional, not redundant).
+
+---
+
+## Files changed
+
+| File | Change |
+|------|--------|
+| `apps/web/src/app/dashboard/layout.tsx` | +`dynamic`/`revalidate` exports + security comment |
+| `apps/web/src/app/(auth)/onboarding/layout.tsx` | +`dynamic`/`revalidate` exports + security comment |
+
+2 files, 31 insertions (all comments + 2 export lines per file).
+
+---
+
+## /simplify findings
+
+Three review passes (reuse, quality, efficiency) — no issues found.
+
+- **Reuse:** Pattern matches existing `export const dynamic = "force-dynamic"` in `api/team/[slug]/chat/route.ts`. No new abstractions needed.
+- **Quality:** `revalidate = 0` is technically redundant when `force-dynamic` is set, but it is documented as intentional belt-and-suspenders. Not removed.
+- **Efficiency:** API routes (`/api/*`) don't need this — they return JSON and are not CDN-cached by default. Only the two page-level auth-gated layouts needed the fix. Scope is correct.
+
+---
+
+## Boundaries respected
+
+- Landing page, `/login`, `/signup`, and all other unauthenticated routes untouched.
+- No blanket root-layout caching disable.
+- No unrelated code touched.
+
+---
+
+## Notes
+
+- PR #11 is DRAFT. Minervamon reviews + smokes before merge.
+- No migrations needed.
+- No environment variable changes needed.
+- The fix is deploy-safe: `force-dynamic` degrades gracefully in dev (no caching there anyway).
