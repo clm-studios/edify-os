@@ -910,4 +910,55 @@ Three review passes (reuse, quality, efficiency) — no issues found.
 - PR #11 is DRAFT. Minervamon reviews + smokes before merge.
 - No migrations needed.
 - No environment variable changes needed.
+
+---
+
+## 2026-05-24 — fix(pwa): exclude /dashboard + /onboarding from SW cache; bump to v3 (PR #12)
+
+- **Agent:** Sonnet coding agent (spawned by Lopmon)
+- **Branch:** `lopmon/fix-sw-exclude-auth-routes`
+- **Worktree:** `C:\Users\Araly\edify-os-sw-auth-exclude`
+- **Base:** `origin/main` @ `e3f8788` (PR #11 merged 2026-05-24)
+- **PR:** https://github.com/clm-studios/edify-os/pull/12 (DRAFT — Minervamon to smoke test before merge)
+- **Commits:** `1015d2c` (fix), `1f05508` (simplify)
+- **Status:** COMPLETE
+
+### Bug
+
+Minervamon's post-PR-#11 smoke test identified a third cache layer that `Cache-Control: no-store` cannot reach: the PWA Service Worker. The existing SW (`edify-pwa-v2`) applied a `stale-while-revalidate` strategy to ALL HTML navigation requests, which caused authenticated snapshots of `/dashboard/inbox`, `/dashboard/tasks`, `/dashboard/team/marketing_director`, RSC payloads, and other auth-gated routes to be stored in Cache Storage (196 entries total, 134 non-static). On a same-URL revisit the SW intercepted and served the stale cached response — bypassing the server-side session guards from PRs #9–#11. Live symptom: `transferSize: 0` on `/dashboard` nav.
+
+### PWA Config Flavor
+
+**Custom hand-written service worker** — `apps/web/public/sw.js`, registered via `RegisterServiceWorker.tsx`. No `next-pwa`, no `serwist`, no Workbox. Pure vanilla SW API.
+
+### Fix (Option A — full exclusion)
+
+Added `AUTH_GATED_PREFIXES = ["/dashboard", "/onboarding"]` constant and an early-return guard in the `fetch` event handler before any other routing logic. When a request's pathname starts with an auth-gated prefix, the handler returns without calling `event.respondWith()` — the browser handles the request natively with zero SW cache involvement (no read, no write).
+
+Also removed `/dashboard` from the `APP_SHELL` pre-cache list (it was the only auth-gated entry in the install-time list).
+
+### Cache version bump
+
+`edify-pwa-v2` → `edify-pwa-v3`. The activate event purges all buckets that don't match `CACHE_VERSION`, which evicts every stale authenticated Cache Storage entry on users' next visit. Without this bump, existing installs keep the stale v2 cache.
+
+### Files changed
+
+- `apps/web/public/sw.js` — 1 file, 25 insertions, 2 deletions (main fix) + 1 simplify cleanup
+
+### /simplify findings
+
+One quality issue found and fixed: redundant inline comment `// Let the browser handle the request natively (no event.respondWith)` on the `return` statement — the block comment above already explained the WHY. Removed. No reuse or efficiency issues found.
+
+### Boundaries respected
+
+- Static assets (JS chunks, CSS, fonts, images, `/` landing) continue to use cache-first/SWR — no PWA perf regression.
+- Auth-gated route exclusion covers both navigation AND sub-resource requests (the `.some()` check runs before the `navigate` mode check, so RSC payloads fetched under auth-gated paths are also excluded).
+- No other files touched.
+
+### Notes
+
+- PR #12 is DRAFT. Minervamon reviews + smokes before merge.
+- No migrations needed.
+- No environment variable changes needed.
+- If new auth-gated route groups are added in future, append to `AUTH_GATED_PREFIXES` and bump `CACHE_VERSION`.
 - The fix is deploy-safe: `force-dynamic` degrades gracefully in dev (no caching there anyway).
