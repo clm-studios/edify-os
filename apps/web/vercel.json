@@ -26,8 +26,8 @@
     },
     {
       "path": "/api/proof-library/extract-pending",
-      "schedule": "0 */3 * * *",
-      "_comment": "Sprint A.5: document extraction sweeper. Runs every 3h (Vercel Hobby daily-only cron). Piggybacked on existing cron tier. Sub-daily schedules must be deployed via `vercel --prod` CLI to surface validation errors (see reference_vercel_hobby_cron_tier_limit.md)."
+      "schedule": "0 0 * * *",
+      "_comment": "Sprint A.5: document extraction sweeper. Runs once daily at UTC midnight. Originally specced at 3h but Vercel Hobby tier rejects sub-daily crons (CLI deploy surfaced this; reference_vercel_hobby_cron_tier_limit.md). Tradeoff: extraction retries span 3 days instead of 9h; fresh-user case unaffected (wizard-completion sync trigger handles first-run). Revisit if/when upgrading to Pro."
     }
   ]
 }
