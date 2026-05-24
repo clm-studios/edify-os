@@ -1,3 +1,33 @@
+# Session Log — Sprint A.5 Proof Library Substrate (2026-05-24)
+
+**Agent:** Sonnet coding agent (spawned by Lopmon)
+**Branch:** `lopmon/sprint-a5-proof-library-substrate`
+**Date:** 2026-05-24
+**PR:** https://github.com/clm-studios/edify-os/pull/14 (DRAFT)
+
+## Summary
+
+Built the proof library substrate (Sprint A.5): typed document storage pipeline, dual-trigger extraction, query layer, and get_org_memory tool.
+
+## Files changed
+
+| File | Change |
+|---|---|
+| supabase/migrations/00038_proof_library_substrate.sql | New — memory categories + JSONB column + retry columns + bucket |
+| supabase/migrations/00039_proof_library_demo_seed.sql | New — demo org seed data |
+| apps/web/src/app/api/briefing/upload/route.ts | Modified — Phase 2 Storage wiring |
+| apps/web/src/lib/proof-library/extract.ts | New — core extractor module |
+| apps/web/src/app/api/proof-library/extract-pending/route.ts | New — cron sweeper |
+| apps/web/src/app/api/onboarding/complete/route.ts | Modified — sync extraction trigger |
+| apps/web/src/lib/memory/get-by-category.ts | New — query helper |
+| apps/web/src/lib/tools/org-memory.ts | New — get_org_memory tool |
+| apps/web/src/lib/tools/registry.ts | Modified — register org-memory tool |
+| apps/web/vercel.json | Modified — 3h cron for extract-pending |
+
+## Status: DRAFT PR open, awaiting Minervamon review + smoke test
+
+---
+
 # Session Log — flyer-wow-2026-04-29
 
 ## 2026-04-28 — Flyer Skill Wow-Factor Overhaul
