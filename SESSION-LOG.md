@@ -1,88 +1,3 @@
-# SESSION-LOG — Sprint A.5 Proof Library Substrate (2026-05-24)
-
-**Identity:** Sonnet coding agent (spawned by Lopmon)
-**Branch:** `lopmon/sprint-a5-proof-library-substrate`
-**Worktree:** `C:\Users\Araly\edify-os-proof-library-substrate`
-**Base:** `origin/main` @ `e3f8788`
-**Date:** 2026-05-24
-**PR:** https://github.com/clm-studios/edify-os/pull/14 (DRAFT)
-
----
-
-## What was built
-
-### 1. Schema migrations
-- `00038_proof_library_substrate.sql`: new memory categories (outcomes, prior_grants, voice_samples), JSONB data column on memory_entries, retry_count + last_attempted_at on documents, org-documents Storage bucket
-- `00039_proof_library_demo_seed.sql`: synthetic grant + outcomes data for demo org (auto-locates by name pattern)
-
-### 2. Upload route wiring
-- `/api/briefing/upload` now persists files to Supabase Storage (org-documents bucket)
-- Fail-loud on Storage errors + document insert failures (OQ-5 resolved)
-- Demo-mode guard via NEXT_PUBLIC_DEMO_MODE
-
-### 3. Extractor module (`lib/proof-library/extract.ts`)
-- `extractPendingDocuments(serviceClient, apiKey, options)` shared by both trigger paths
-- Routing table: document category → proof lib categories
-- Minimal PDF text extraction (BT/ET operator scan, no native binaries)
-- Claude Sonnet 4.5 structured extraction prompts per category
-- Retry logic with retry_count cap at 3
-- Shared exports: `ORG_DOCUMENTS_BUCKET`, `PROOF_LIBRARY_CATEGORIES`, `resolveOrgAnthropicKey`
-
-### 4. Cron sweeper
-- `/api/proof-library/extract-pending`: bulk sweep (all orgs) + single-org mode
-- vercel.json cron `0 */3 * * *` (3h, Vercel Hobby tier)
-- 50s sweep timeout guard to prevent 60s function limit overflow
-
-### 5. Wizard-completion immediate trigger
-- `/api/onboarding/complete` now fires `extractPendingDocuments` synchronously (Option A)
-- maxDocs=5 cap, timeoutMs=45_000, non-fatal
-- UX reasoning in PR body + route docstring
-
-### 6. Query layer + tool
-- `lib/memory/get-by-category.ts`: `getMemoryByCategory()` with JSONB path filters
-- `lib/tools/org-memory.ts`: `get_org_memory` tool for Dev Director + Programs Director
-- registry.ts: orgMemoryTools registered + dispatch branch added
-
-## Decisions made
-
-### UX Option A (synchronous) chosen for wizard trigger
-Rationale: Z's bar is "visibly better than ChatGPT FROM THE FIRST INTERACTION." Async extraction risks the first dashboard interaction being generic. Synchronous blocks on extraction (maxDocs=5) then returns 200. Minervamon settles at PR review.
-
-### Anthropic client constructed once per extractPendingDocuments call
-Per /simplify review: constructing inside extractSingleDocument creates N objects per sweep. Moved to extractPendingDocuments and threaded down.
-
-### Skipped count arithmetic bug fixed
-Original: `result.skipped += docs.length - result.processed - result.failed - result.skipped` (double-subtracted skipped). Fixed to: `result.skipped = docs.length - result.processed - result.failed`.
-
-### resolveOrgAnthropicKey extracted as shared export
-Both extract-pending route and onboarding/complete route needed the same fetch+decrypt pattern. Extracted to lib/proof-library/extract.ts as a named export.
-
-## Trade-offs documented
-
-- PDF extraction is minimal (no native binary parser). Works for text-layer PDFs; image-only PDFs gracefully yield zero memory entries. A proper PDF parser (pdf-parse) is the fast-follow when budget allows.
-- Memory entry inserts are sequential (not atomic). Partial success acceptable; duplicate detection is by source+title. Full atomic transaction would require a Postgres RPC.
-- Cron is 3h not sub-hourly — Vercel Hobby tier constraint. Wizard trigger covers first-run UX gap.
-
-## Open items / fast-follows
-- Vercel cron deployment: must use `vercel --prod` CLI not dashboard (sub-daily cron validation)
-- Migration 00038 + 00039 require Citlali manual SQL Editor apply before deploy
-- Demo org UUID for 00039 seed: auto-locates by name pattern, may need manual verify
-- `get_org_memory` for Executive Assistant + Events Director: fast-follow
-- `budgets`, `stories`, `testimonials` categories: fast-follow
-- PDF parser upgrade (pdf-parse or equivalent): fast-follow
-
-## /simplify findings fixed
-- Shared ORG_DOCUMENTS_BUCKET constant (was redefined in upload route)
-- Shared PROOF_LIBRARY_CATEGORIES (was array literals in 3 places)
-- Shared resolveOrgAnthropicKey (was duplicated in 2 routes)
-- Anthropic client reuse (was N instantiations per sweep)
-- Skipped count arithmetic fix
-- Removed redundant try/catch around req.json().catch()
-- Added sweep timeout guard in cron bulk path
-- Removed narrating "Step N:" comments in upload route
-
----
-
 # SESSION-LOG — Sprint α Sweet cheap-win (HR / Volunteer Coordinator)
 
 **Identity:** Sprint α Sweet cheap-win agent (Sonnet, spawned by Lopmon)
@@ -996,3 +911,89 @@ Three review passes (reuse, quality, efficiency) — no issues found.
 - No migrations needed.
 - No environment variable changes needed.
 - The fix is deploy-safe: `force-dynamic` degrades gracefully in dev (no caching there anyway).
+
+---
+
+## 2026-05-24 — feat(proof-library): Sprint A.5 substrate — docs + dual-trigger extraction + query tool (PR #14)
+
+**Identity:** Sonnet coding agent (spawned by Lopmon)
+**Branch:** `lopmon/sprint-a5-proof-library-substrate`
+**Worktree:** `C:\Users\Araly\edify-os-proof-library-substrate`
+**Base:** `origin/main` @ `e3f8788`
+**Date:** 2026-05-24
+**PR:** https://github.com/clm-studios/edify-os/pull/14 (DRAFT)
+
+---
+
+## What was built
+
+### 1. Schema migrations
+- `00038_proof_library_substrate.sql`: new memory categories (outcomes, prior_grants, voice_samples), JSONB data column on memory_entries, retry_count + last_attempted_at on documents, org-documents Storage bucket
+- `00039_proof_library_demo_seed.sql`: synthetic grant + outcomes data for demo org (auto-locates by name pattern)
+
+### 2. Upload route wiring
+- `/api/briefing/upload` now persists files to Supabase Storage (org-documents bucket)
+- Fail-loud on Storage errors + document insert failures (OQ-5 resolved)
+- Demo-mode guard via NEXT_PUBLIC_DEMO_MODE
+
+### 3. Extractor module (`lib/proof-library/extract.ts`)
+- `extractPendingDocuments(serviceClient, apiKey, options)` shared by both trigger paths
+- Routing table: document category → proof lib categories
+- Minimal PDF text extraction (BT/ET operator scan, no native binaries)
+- Claude Sonnet 4.5 structured extraction prompts per category
+- Retry logic with retry_count cap at 3
+- Shared exports: `ORG_DOCUMENTS_BUCKET`, `PROOF_LIBRARY_CATEGORIES`, `resolveOrgAnthropicKey`
+
+### 4. Cron sweeper
+- `/api/proof-library/extract-pending`: bulk sweep (all orgs) + single-org mode
+- vercel.json cron `0 */3 * * *` (3h, Vercel Hobby tier)
+- 50s sweep timeout guard to prevent 60s function limit overflow
+
+### 5. Wizard-completion immediate trigger
+- `/api/onboarding/complete` now fires `extractPendingDocuments` synchronously (Option A)
+- maxDocs=5 cap, timeoutMs=45_000, non-fatal
+- UX reasoning in PR body + route docstring
+
+### 6. Query layer + tool
+- `lib/memory/get-by-category.ts`: `getMemoryByCategory()` with JSONB path filters
+- `lib/tools/org-memory.ts`: `get_org_memory` tool for Dev Director + Programs Director
+- registry.ts: orgMemoryTools registered + dispatch branch added
+
+## Decisions made
+
+### UX Option A (synchronous) chosen for wizard trigger
+Rationale: Z's bar is "visibly better than ChatGPT FROM THE FIRST INTERACTION." Async extraction risks the first dashboard interaction being generic. Synchronous blocks on extraction (maxDocs=5) then returns 200. Minervamon settles at PR review.
+
+### Anthropic client constructed once per extractPendingDocuments call
+Per /simplify review: constructing inside extractSingleDocument creates N objects per sweep. Moved to extractPendingDocuments and threaded down.
+
+### Skipped count arithmetic bug fixed
+Original: `result.skipped += docs.length - result.processed - result.failed - result.skipped` (double-subtracted skipped). Fixed to: `result.skipped = docs.length - result.processed - result.failed`.
+
+### resolveOrgAnthropicKey extracted as shared export
+Both extract-pending route and onboarding/complete route needed the same fetch+decrypt pattern. Extracted to lib/proof-library/extract.ts as a named export.
+
+## Trade-offs documented
+
+- PDF extraction is minimal (no native binary parser). Works for text-layer PDFs; image-only PDFs gracefully yield zero memory entries. A proper PDF parser (pdf-parse) is the fast-follow when budget allows.
+- Memory entry inserts are sequential (not atomic). Partial success acceptable; duplicate detection is by source+title. Full atomic transaction would require a Postgres RPC.
+- Cron is 3h not sub-hourly — Vercel Hobby tier constraint. Wizard trigger covers first-run UX gap.
+
+## Open items / fast-follows
+- Vercel cron deployment: must use `vercel --prod` CLI not dashboard (sub-daily cron validation)
+- Migration 00038 + 00039 require Citlali manual SQL Editor apply before deploy
+- Demo org UUID for 00039 seed: auto-locates by name pattern, may need manual verify
+- `get_org_memory` for Executive Assistant + Events Director: fast-follow
+- `budgets`, `stories`, `testimonials` categories: fast-follow
+- PDF parser upgrade (pdf-parse or equivalent): fast-follow
+
+## /simplify findings fixed
+- Shared ORG_DOCUMENTS_BUCKET constant (was redefined in upload route)
+- Shared PROOF_LIBRARY_CATEGORIES (was array literals in 3 places)
+- Shared resolveOrgAnthropicKey (was duplicated in 2 routes)
+- Anthropic client reuse (was N instantiations per sweep)
+- Skipped count arithmetic fix
+- Removed redundant try/catch around req.json().catch()
+- Added sweep timeout guard in cron bulk path
+- Removed narrating "Step N:" comments in upload route
+
