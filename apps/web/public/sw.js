@@ -75,7 +75,7 @@ self.addEventListener("fetch", (event) => {
   // Serving a stale authenticated snapshot to a browser that may no longer be
   // authorized would bypass the server-side session guards added in PRs #9–#11.
   if (AUTH_GATED_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) {
-    return; // Let the browser handle the request natively (no event.respondWith)
+    return;
   }
 
   // API routes: network-first, no caching
