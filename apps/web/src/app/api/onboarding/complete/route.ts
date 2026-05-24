@@ -1,33 +1,49 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServiceRoleClient, getAuthContext } from '@/lib/supabase/server';
+import { extractPendingDocuments, resolveOrgAnthropicKey } from '@/lib/proof-library/extract';
 
 /**
  * POST /api/onboarding/complete
  *
- * Persists the briefing-form payload and seeds org memory.
- * Called from /dashboard/briefing on final step submission.
+ * Persists the briefing-form payload, seeds org memory, and triggers immediate
+ * document extraction for any documents uploaded during the briefing wizard.
  *
  * Write order (sequential, NOT wrapped in a Postgres transaction — Supabase JS
  * client does not expose raw BEGIN/COMMIT in Edge routes):
  *   1. UPDATE orgs — sets briefing fields + onboarding_completed_at.
  *   2. INSERT memory_entries (bulk) — org_profile preamble + per-program
  *      entries + goals entry.
- * Partial success is acceptable per PRD: if the memory insert fails, the org
- * update already succeeded and the preamble can be re-created from settings.
- * Step 2 failure logs an error but does NOT block the 200 response.
+ *   3. EXTRACT pending documents — SYNCHRONOUS (Option A chosen — see below).
  *
- * Accepts users who have an org row (created via /onboarding) but have not yet
- * completed the briefing (onboarding_completed_at is null). This is the same
- * write path for new users and for existing users whose briefing was
- * previously localStorage-only (F5 silent backfill — no special casing needed).
+ * UX Decision: Option A — Synchronous extraction on wizard completion.
+ *
+ * Rationale for choosing Option A over Option B (async):
+ *   The product goal is "visibly better than ChatGPT FROM THE FIRST INTERACTION"
+ *   (Z's explicit bar). Onboarding completion is the ONE moment in the entire
+ *   user journey where we have guaranteed advance notice that the user is about
+ *   to hit the dashboard for the first time. If extraction runs async:
+ *     - User lands on dashboard, clicks Dev Director, asks "what grants have we
+ *       applied for?" → generic response. That IS the ChatGPT experience.
+ *     - The 3h cron sweeper is the right fallback for ONGOING extraction
+ *       (user uploads a new doc 3 months in), but it's wrong for the first-run
+ *       moment when the user is literally watching a loading screen anyway.
+ *   A brief "setting up your team…" loading state (30-60s) is a well-established
+ *   post-onboarding UX pattern (Notion, Slack, Linear all do it). Users expect
+ *   a processing moment at the end of a multi-step wizard. The guarantee that
+ *   the first interaction is context-aware is worth the wait.
+ *
+ *   Edge cases:
+ *   - Doc count cap: maxDocs=5 to prevent unbounded blocking on a 50-file upload.
+ *     Remaining docs fall through to the 3h cron sweeper.
+ *   - Extraction errors do NOT block the 200 — if extraction fails, the user
+ *     lands on dashboard with the cron sweeper as fallback. Fail-safe, not fail-stop.
+ *   - Timeout: timeoutMs=45_000 gives us 45s within Vercel Hobby's 60s limit.
+ *   - No Anthropic key: gracefully skipped, cron handles it.
  *
  * Guards:
  * - Rejects unauthenticated requests (401).
- * - Rejects requests from users with no org/member row (403) — those users
- *   must visit /onboarding first to create the org. The /dashboard/briefing
- *   page prevents reaching this state via a mount-time org check (Option β).
- * - Idempotent: if onboarding_completed_at is already set, returns 409 with
- *   the existing orgId so the client can redirect cleanly.
+ * - Rejects requests from users with no org/member row (403).
+ * - Idempotent: if onboarding_completed_at is already set, returns 409.
  *
  * Body shape (matches briefing form state):
  *   orgProfile: { orgName, missionStatement, website, annualBudget,
@@ -37,7 +53,7 @@ import { createServiceRoleClient, getAuthContext } from '@/lib/supabase/server';
  *                            peopleServed, keyOutcomes }] }
  *   goals: { selectedGoals: string[], additionalContext: string }
  *
- * Returns: { orgId: string, redirectTo: "/dashboard" }
+ * Returns: { orgId: string, redirectTo: "/dashboard", extractionResult?: { processed, failed, skipped } }
  */
 
 interface OrgProfilePayload {
@@ -227,7 +243,38 @@ export async function POST(req: NextRequest) {
     // Log for follow-up but return success.
   }
 
-  return NextResponse.json({ orgId, redirectTo: '/dashboard' }, { status: 200 });
+  // Step 5: Immediate extraction trigger (wizard-completion path).
+  // Synchronous / Option A — blocks on extraction before returning 200.
+  // See docstring for full UX reasoning. Non-fatal: extraction errors are
+  // logged but do NOT prevent the user from reaching /dashboard.
+  let extractionResult: { processed: number; failed: number; skipped: number } | null = null;
+
+  try {
+    const apiKey = await resolveOrgAnthropicKey(serviceClient, orgId);
+
+    if (apiKey) {
+      // Cap at 5 docs so a large briefing upload doesn't block indefinitely.
+      // Remaining docs are handled by the 3h cron sweeper.
+      extractionResult = await extractPendingDocuments(serviceClient, apiKey, {
+        orgId,
+        maxDocs: 5,
+        timeoutMs: 45_000,
+      });
+      console.log('[onboarding/complete] Immediate extraction result:', extractionResult);
+    }
+  } catch (extractionErr) {
+    // Extraction failure does NOT block the user — cron is the safety net.
+    console.error('[onboarding/complete] Immediate extraction error (non-fatal):', extractionErr);
+  }
+
+  return NextResponse.json(
+    {
+      orgId,
+      redirectTo: '/dashboard',
+      ...(extractionResult ? { extractionResult } : {}),
+    },
+    { status: 200 }
+  );
 }
 
 // ---------------------------------------------------------------------------

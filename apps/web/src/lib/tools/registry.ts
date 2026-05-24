@@ -61,6 +61,11 @@ import {
   executeConsultTeammateTool,
   CONSULT_TEAMMATE_TOOLS_ADDENDUM,
 } from "@/lib/tools/consult-teammate";
+import {
+  orgMemoryTools,
+  executeOrgMemoryTool,
+  ORG_MEMORY_TOOLS_ADDENDUM,
+} from "@/lib/tools/org-memory";
 import { getValidGoogleAccessToken, type GoogleIntegrationType } from "@/lib/google";
 import { ARCHETYPE_SLUGS, type ArchetypeSlug } from "@/lib/archetypes";
 
@@ -85,6 +90,7 @@ export {
   REPORT_EVENT_TOOLS_ADDENDUM,
   IMPACT_DATA_TOOLS_ADDENDUM,
   CONSULT_TEAMMATE_TOOLS_ADDENDUM,
+  ORG_MEMORY_TOOLS_ADDENDUM,
 };
 export type { RenderToolGeneratedFile };
 
@@ -104,6 +110,7 @@ const BRAND_GUIDELINES_TOOL_NAMES = new Set(brandGuidelinesTools.map((t) => t.na
 const REPORT_EVENT_TOOL_NAMES = new Set(reportEventTools.map((t) => t.name));
 const IMPACT_DATA_TOOL_NAMES = new Set(impactDataTools.map((t) => t.name));
 const CONSULT_TEAMMATE_TOOL_NAMES = new Set(consultTeammateTools.map((t) => t.name));
+const ORG_MEMORY_TOOL_NAMES = new Set(orgMemoryTools.map((t) => t.name));
 // search_grants has prefix "search" — pin via name set so the prefix-split
 // fallback doesn't resolve it to "search".
 const SEARCH_GRANTS_TOOL_NAMES = new Set(
@@ -176,6 +183,10 @@ export function getToolFamilies(tools: Anthropic.Tool[]): Set<string> {
       families.add("consult_teammate");
       continue;
     }
+    if (ORG_MEMORY_TOOL_NAMES.has(t.name)) {
+      families.add("org_memory");
+      continue;
+    }
     if (SEARCH_GRANTS_TOOL_NAMES.has(t.name)) {
       families.add("search_grants");
       continue;
@@ -211,6 +222,7 @@ export function buildSystemAddendums(tools: Anthropic.Tool[]): string {
   if (families.has("report_event")) parts.push(REPORT_EVENT_TOOLS_ADDENDUM);
   if (families.has("impact_data")) parts.push(IMPACT_DATA_TOOLS_ADDENDUM);
   if (families.has("consult_teammate")) parts.push(CONSULT_TEAMMATE_TOOLS_ADDENDUM);
+  if (families.has("org_memory")) parts.push(ORG_MEMORY_TOOLS_ADDENDUM);
   return parts.join("");
 }
 
@@ -222,7 +234,7 @@ export function buildSystemAddendums(tools: Anthropic.Tool[]): string {
 export const ARCHETYPE_TOOLS: Record<ArchetypeSlug, Anthropic.Tool[]> = {
   executive_assistant: [...calendarTools, ...gmailTools, ...driveTools, ...memoryTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
   events_director: [...calendarTools, ...driveTools, ...unsplashTools, ...memoryTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
-  development_director: [...calendarTools, ...searchGrantsTools, ...crmTools, ...gmailTools, ...driveTools, ...memoryTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
+  development_director: [...calendarTools, ...searchGrantsTools, ...crmTools, ...gmailTools, ...driveTools, ...memoryTools, ...orgMemoryTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
   marketing_director: [
     ...driveTools,
     ...unsplashTools,
@@ -238,7 +250,7 @@ export const ARCHETYPE_TOOLS: Record<ArchetypeSlug, Anthropic.Tool[]> = {
     ...impactDataReadTools,
     ...consultTeammateTools,
   ],
-  programs_director: [...searchGrantsTools, ...driveTools, ...memoryTools, ...reportEventTools, ...impactDataWriteTools, ...impactDataReadTools, ...consultTeammateTools],
+  programs_director: [...searchGrantsTools, ...driveTools, ...memoryTools, ...orgMemoryTools, ...reportEventTools, ...impactDataWriteTools, ...impactDataReadTools, ...consultTeammateTools],
   hr_volunteer_coordinator: [...calendarTools, ...gmailTools, ...driveTools, ...memoryTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
 };
 
@@ -471,6 +483,10 @@ export async function executeTool({
       sourceArchetype: archetypeSlug ?? "unknown",
       anthropic,
     });
+  }
+
+  if (ORG_MEMORY_TOOL_NAMES.has(name)) {
+    return executeOrgMemoryTool({ name, input, orgId, serviceClient });
   }
 
   return { content: `Unknown tool: ${name}`, is_error: true };
