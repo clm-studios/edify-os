@@ -34,6 +34,7 @@ import type { ArchetypeSlug } from "@/lib/archetypes";
 import { insertActivityEvent } from "@/lib/hours-saved/insert-event";
 import { ARCHETYPE_PLUGIN_SKILLS, selectSkillsForMessage, SKILL_CAP } from "@/lib/plugins/registry";
 import { buildMcpServersForOrg } from "@/lib/mcp/registry";
+import { classifyIntent, INTENT_CLASSIFIER_ENABLED } from "@/lib/chat/classify-intent";
 
 const TOOL_USE_LOOP_MAX = 8;
 const MAX_RESPONSE_TOKENS = 4096;
@@ -128,7 +129,40 @@ export async function runArchetypeTurn({
   model = "sonnet",
   onTextDelta,
 }: RunArchetypeTurnOptions): Promise<RunArchetypeTurnResult> {
-  const modelId = MODEL_IDS[model];
+  // Batch 2 Phase 1 — Intent classifier + Haiku routing.
+  //
+  // When a caller passes model = "haiku" explicitly (e.g. heartbeat trigger),
+  // skip the classifier and use Haiku unconditionally. When model = "sonnet"
+  // (the interactive default), run the classifier to opportunistically route
+  // light Q&A turns to Haiku for ~40-50% faster TTFT on those turns.
+  //
+  // The classifier itself uses Haiku with a tiny prompt (~150-300ms). Net
+  // light-turn TTFT: classifier + Haiku ≈ 700-1100ms vs Sonnet's ~1500ms.
+  //
+  // CACHE NOTE: Anthropic caches per-model, so switching Sonnet→Haiku→Sonnet
+  // means Haiku turn 2 starts cold. The per-turn saving still outweighs the
+  // cache miss on light turns.
+  let resolvedModel: "sonnet" | "haiku" = model;
+  if (model === "sonnet" && INTENT_CLASSIFIER_ENABLED) {
+    const classifierStartMs = Date.now();
+    const classification = await classifyIntent(userMessage, history, anthropic);
+    const classifierMs = Date.now() - classifierStartMs;
+
+    resolvedModel = classification.tier === "light" ? "haiku" : "sonnet";
+
+    // [perf] intent log — filter in Vercel with: [perf] intent
+    console.log("[perf] intent", {
+      orgId,
+      archetype,
+      userMessageLen: userMessage.length,
+      tier: classification.tier,
+      reason: classification.reason,
+      classifierMs,
+      resolvedModel,
+    });
+  }
+
+  const modelId = MODEL_IDS[resolvedModel];
 
   const basePrompt = ARCHETYPE_PROMPTS[archetype] ?? "";
   const systemPrompt =
@@ -616,6 +650,7 @@ export async function runArchetypeTurn({
   console.log("[perf] turn", {
     orgId,
     archetype,
+    model: resolvedModel,
     ttftMs,
     totalMs,
     totalCacheReadTokens: tokenUsage.cacheReadTokens,
