@@ -1135,3 +1135,44 @@ Both extract-pending route and onboarding/complete route needed the same fetch+d
 - Added sweep timeout guard in cron bulk path
 - Removed narrating "Step N:" comments in upload route
 
+
+## 2026-05-25 — feat(auth): add sign-out button to dashboard sidebar (PR #15)
+
+- **Agent:** Sonnet coding agent (spawned by Lopmon)
+- **Branch:** `lopmon/feat-sign-out-button`
+- **Worktree:** `C:\Users\Araly\edify-os-sign-out-button`
+- **Base:** `origin/main` @ `be62d07` (vercel.json cron hotfix)
+- **PR:** https://github.com/clm-studios/edify-os/pull/15 (DRAFT — Minervamon to smoke test before merge)
+- **Status:** COMPLETE
+
+### Gap
+
+Minervamon flagged 2026-05-23 22:09 UTC: no sign-out button anywhere in the UI. Became operationally blocking 2026-05-25: middleware redirects authed users away from `/login`, so escaping a session required DevTools → clear cookies.
+
+### Implementation
+
+`signOut()` already existed in `apps/web/src/lib/supabase/auth.ts` — no changes needed there.
+
+Added to `apps/web/src/components/sidebar.tsx`:
+- `useRouter` import from `next/navigation`
+- `LogOut` icon import from `lucide-react`
+- `signOut` import from `@/lib/supabase/auth`
+- `handleSignOut` async function: calls `signOut()`, then `router.push('/login')`
+- `<button>` with `LogOut` icon in the sidebar footer, adjacent to the existing Settings gear
+
+### Placement reasoning
+
+Sidebar footer already has avatar + display name + Settings icon in a flex row. Adding LogOut immediately to its right is the most natural account-action location, visible from every dashboard page, requires zero layout changes, and matches Settings icon styling exactly (`text-brand-400 hover:text-brand-200 transition`).
+
+### Files changed
+
+- `apps/web/src/components/sidebar.tsx` — 1 file, 16 lines added
+
+### /simplify findings
+
+All clean. No reuse, quality, or efficiency issues in the new code:
+- `signOut` correctly reuses the existing auth helper (not reimplemented)
+- `useRouter` matches the pattern used by 10+ other components
+- `handleSignOut` is a simple fire-once click handler, no hot-path or polling concerns
+- Error case: if `signOut()` returns an error (e.g., Supabase not configured), `router.push('/login')` still fires — correct behavior since no valid session exists anyway
+- Pre-existing unused imports (`Sparkles`, `Users`) noted but not in scope of this PR
