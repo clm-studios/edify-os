@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import {
   LayoutDashboard,
@@ -20,7 +20,9 @@ import {
   Sunrise,
   Waves,
   Sparkles,
+  LogOut,
 } from 'lucide-react';
+import { signOut } from '@/lib/supabase/auth';
 import { AGENT_COLORS, AGENT_SLUGS } from '@/lib/agent-colors';
 import { cn } from '@/lib/utils';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
@@ -47,6 +49,7 @@ const navLinks = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { unreadCount } = useNotifications();
   const { user } = useAuth();
   const { names: archetypeNames } = useArchetypeNames();
@@ -96,6 +99,11 @@ export function Sidebar() {
     return 'Nonprofit User';
   })();
   const avatarInitial = displayName.charAt(0).toUpperCase();
+
+  async function handleSignOut() {
+    await signOut();
+    router.push('/login');
+  }
 
   useEffect(() => {
     try {
@@ -314,6 +322,13 @@ export function Sidebar() {
         >
           <Settings size={16} />
         </Link>
+        <button
+          onClick={handleSignOut}
+          className="text-brand-400 hover:text-brand-200 transition"
+          aria-label="Sign out"
+        >
+          <LogOut size={16} />
+        </button>
       </div>
     </aside>
   );
