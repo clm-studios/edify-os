@@ -21,6 +21,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import { MODEL_IDS } from "@/lib/chat/run-archetype-turn";
 
 // ---------------------------------------------------------------------------
 // Config knobs — override with environment variables for quick prod tuning.
@@ -119,10 +120,7 @@ export async function classifyIntent(
   // Trim each to 300 chars to keep the classifier prompt short.
   const contextTurns = recentHistory.slice(-2).map((turn) => ({
     role: turn.role,
-    content:
-      typeof turn.content === "string" && turn.content.length > 300
-        ? turn.content.slice(0, 300) + "…"
-        : turn.content,
+    content: turn.content.length > 300 ? turn.content.slice(0, 300) + "…" : turn.content,
   }));
 
   const classifierMessages: Anthropic.MessageParam[] = [
@@ -135,7 +133,7 @@ export async function classifyIntent(
 
   try {
     const response = await anthropicClient.messages.create({
-      model: "claude-haiku-4-5-20251001",
+      model: MODEL_IDS.haiku,
       max_tokens: 80,
       temperature: 0,
       system: CLASSIFIER_SYSTEM_PROMPT,

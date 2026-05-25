@@ -40,7 +40,8 @@ const TOOL_USE_LOOP_MAX = 8;
 const MAX_RESPONSE_TOKENS = 4096;
 
 // B. Model ID map — "sonnet" is the interactive default; "haiku" for cheap workloads.
-const MODEL_IDS: Record<"sonnet" | "haiku", string> = {
+// Exported so classify-intent.ts can reference the same strings without duplication.
+export const MODEL_IDS: Record<"sonnet" | "haiku", string> = {
   sonnet: "claude-sonnet-4-6",
   haiku: "claude-haiku-4-5-20251001",
 };
@@ -131,39 +132,10 @@ export async function runArchetypeTurn({
 }: RunArchetypeTurnOptions): Promise<RunArchetypeTurnResult> {
   // Batch 2 Phase 1 — Intent classifier + Haiku routing.
   //
-  // When a caller passes model = "haiku" explicitly (e.g. heartbeat trigger),
-  // skip the classifier and use Haiku unconditionally. When model = "sonnet"
-  // (the interactive default), run the classifier to opportunistically route
-  // light Q&A turns to Haiku for ~40-50% faster TTFT on those turns.
-  //
-  // The classifier itself uses Haiku with a tiny prompt (~150-300ms). Net
-  // light-turn TTFT: classifier + Haiku ≈ 700-1100ms vs Sonnet's ~1500ms.
-  //
-  // CACHE NOTE: Anthropic caches per-model, so switching Sonnet→Haiku→Sonnet
-  // means Haiku turn 2 starts cold. The per-turn saving still outweighs the
-  // cache miss on light turns.
-  let resolvedModel: "sonnet" | "haiku" = model;
-  if (model === "sonnet" && INTENT_CLASSIFIER_ENABLED) {
-    const classifierStartMs = Date.now();
-    const classification = await classifyIntent(userMessage, history, anthropic);
-    const classifierMs = Date.now() - classifierStartMs;
-
-    resolvedModel = classification.tier === "light" ? "haiku" : "sonnet";
-
-    // [perf] intent log — filter in Vercel with: [perf] intent
-    console.log("[perf] intent", {
-      orgId,
-      archetype,
-      userMessageLen: userMessage.length,
-      tier: classification.tier,
-      reason: classification.reason,
-      classifierMs,
-      resolvedModel,
-    });
-  }
-
-  const modelId = MODEL_IDS[resolvedModel];
-
+  // Classifier runs in parallel with tool/MCP resolution (both independent of each other).
+  // Light turns route to Haiku (~200-400ms first-token); deliverable turns stay on Sonnet.
+  // CACHE NOTE: Anthropic caches per-model — Haiku turns start cold even if Sonnet was warm.
+  // The per-turn saving still outweighs this cache miss on light turns.
   const basePrompt = ARCHETYPE_PROMPTS[archetype] ?? "";
   const systemPrompt =
     buildCustomNameInstruction(customArchetypeName) +
@@ -186,11 +158,36 @@ export async function runArchetypeTurn({
   // Temporal prefix injected at the top of the user's message (not cached).
   const temporalPrefix = `[Context: Today is ${nowLocal} (${nowUtc.toISOString()} UTC — ${timezone}). When the user refers to "today", "tomorrow", "this week", "next month", etc., interpret relative to this date. Always use ISO 8601 format with the user's timezone offset for calendar operations.]\n\n`;
 
-  // Resolve tools and MCP servers in parallel — both are independent DB lookups.
-  const [tools, mcpServers] = await Promise.all([
+  // Resolve tools, MCP servers, and (for interactive turns) intent classification in parallel.
+  // All three are independent — classifier needs only the message + anthropic client, tool
+  // resolution needs only archetype + org DB lookups. Running them together eliminates the
+  // classifier from the critical path on turns where tools resolution takes similar time.
+  const classifierStartMs = Date.now();
+  const [tools, mcpServers, intentResult] = await Promise.all([
     resolveArchetypeTools({ archetype, orgId, serviceClient }),
     buildMcpServersForOrg(archetype, orgId),
+    model === "sonnet" && INTENT_CLASSIFIER_ENABLED
+      ? classifyIntent(userMessage, history, anthropic)
+      : Promise.resolve(null),
   ]);
+
+  let resolvedModel: "sonnet" | "haiku" = model;
+  if (intentResult) {
+    const classifierMs = Date.now() - classifierStartMs;
+    resolvedModel = intentResult.tier === "light" ? "haiku" : "sonnet";
+    // [perf] intent log — filter in Vercel with: [perf] intent
+    console.log("[perf] intent", {
+      orgId,
+      archetype,
+      userMessageLen: userMessage.length,
+      tier: intentResult.tier,
+      reason: intentResult.reason,
+      classifierMs,
+      resolvedModel,
+    });
+  }
+
+  const modelId = MODEL_IDS[resolvedModel];
   const serverTools = ARCHETYPE_SERVER_TOOLS[archetype] ?? [];
   const archetypeSkillIds = ARCHETYPE_SKILLS[archetype] ?? [];
   const toolAddendums = buildSystemAddendums(tools);
