@@ -49,12 +49,20 @@ const SKIP_EXTRACT = args.includes("--skip-extract");
 const FORCE = args.includes("--force");
 const SHOW_HELP = args.includes("--help") || args.includes("-h");
 
+// --org-id <uuid>: required for any non-dry-run, non-help invocation.
+const orgIdFlagIndex = args.indexOf("--org-id");
+const ORG_ID_FLAG: string | null = orgIdFlagIndex !== -1 ? (args[orgIdFlagIndex + 1] ?? null) : null;
+
 if (SHOW_HELP) {
   console.log(`
 seed-proof-library-clm — Generate + upload 8 CLM Studios demo PDFs to the Edify proof library
 
 Usage:
-  pnpm --filter web seed-proof-library-clm [flags]
+  pnpm --filter web seed-proof-library-clm --org-id <uuid> [flags]
+
+Required:
+  --org-id <uuid>  The Edify org UUID to seed (e.g. e07d3c8d-xxxx-xxxx-xxxx-xxxxxxxxxxxx).
+                   Must exist in the orgs table. No name-prefix inference is done.
 
 Flags:
   --dry-run      Render PDFs to tmp/seed-output/; do NOT upload or insert.
@@ -321,39 +329,34 @@ function httpPost(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SupabaseAny = ReturnType<typeof createClient<any>>;
 
-/** Resolve the Edify org ID from the orgs table. */
-async function resolveEdifyOrgId(client: SupabaseAny): Promise<string> {
-  const { data: orgRows, error } = await client
-    .from("orgs")
-    .select("id, name")
-    .ilike("name", "%edify%")
-    .order("created_at", { ascending: true })
-    .limit(5);
-
-  if (error) {
-    console.error("Error querying orgs:", error);
-    throw new Error(`Failed to query orgs: ${error.message}`);
-  }
-
-  if (!orgRows || orgRows.length === 0) {
+/** Validate the --org-id flag value and confirm the org exists in the DB. */
+async function resolveAndValidateOrgId(client: SupabaseAny, orgId: string): Promise<string> {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(orgId)) {
     throw new Error(
-      'No org found matching "%edify%". Cannot proceed without a verified org ID.'
+      `--org-id "${orgId}" is not a valid UUID. Expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
     );
   }
 
-  // Use the known org from SESSION-LOG (e07d3c8d-...)
-  const knownPrefix = "e07d3c8d";
-  const knownOrg = orgRows.find((r: { id: string; name: string }) => r.id.startsWith(knownPrefix));
-  if (knownOrg) {
-    console.log(`[org] Resolved Edify org: id=${knownOrg.id} name="${knownOrg.name}"`);
-    return knownOrg.id;
+  const { data: orgRow, error } = await client
+    .from("orgs")
+    .select("id, name")
+    .eq("id", orgId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to query orgs: ${error.message}`);
   }
 
-  const first = orgRows[0];
-  console.warn(
-    `[org] WARN: Known org prefix ${knownPrefix} not found. Using first match: id=${first.id} name="${first.name}".`
-  );
-  return first.id;
+  if (!orgRow) {
+    throw new Error(
+      `Org not found: no row in orgs table with id="${orgId}". ` +
+      `Verify the UUID and try again.`
+    );
+  }
+
+  console.log(`[org] Confirmed org: id=${orgRow.id} name="${orgRow.name}"`);
+  return orgRow.id;
 }
 
 /** Look up the owner member_id for an org (for uploaded_by). */
@@ -647,6 +650,18 @@ async function extractSingleDocDirect(
 
   // 7. Insert memory_entries
   if (entries.length > 0) {
+    // Idempotency guard: delete any existing entries for this doc before re-inserting,
+    // so re-runs on partial-failure rows don't accumulate duplicates.
+    const { error: deleteError } = await client
+      .from("memory_entries")
+      .delete()
+      .eq("source", `document:${docId}`);
+    if (deleteError) {
+      const msg = `Memory dedup delete error: ${deleteError.message}`;
+      await client.from("documents").update({ processing_status: "failed", retry_count: 1, parsed_text: msg }).eq("id", docId);
+      return { success: false, entriesWritten: 0, error: msg };
+    }
+
     const { error: memError } = await client.from("memory_entries").insert(entries);
     if (memError) {
       const msg = `Memory insert error: ${memError.message}`;
@@ -734,11 +749,19 @@ async function main() {
     return;
   }
 
-  // 5. Resolve org
-  console.log("Resolving Edify org ID...");
+  // 5. Resolve org (requires --org-id <uuid>)
+  if (!ORG_ID_FLAG) {
+    console.error(
+      "--org-id <uuid> is required. Pass the Edify org UUID explicitly " +
+      "(e.g. --org-id e07d3c8d-xxxx-xxxx-xxxx-xxxxxxxxxxxx). " +
+      "Use 'pnpm --filter web tsx scripts/seed-proof-library-clm.ts --help' for usage."
+    );
+    process.exit(1);
+  }
+  console.log("Validating org ID...");
   let orgId: string;
   try {
-    orgId = await resolveEdifyOrgId(client);
+    orgId = await resolveAndValidateOrgId(client, ORG_ID_FLAG);
   } catch (err) {
     console.error("FATAL:", err instanceof Error ? err.message : String(err));
     process.exit(1);
@@ -936,7 +959,7 @@ async function main() {
       }
     }
 
-    if (Date.now() - Date.now() >= POLL_TIMEOUT_MS) {
+    if (Date.now() - startTime >= POLL_TIMEOUT_MS) {
       console.log(`\n  Poll timeout reached. Some docs may still be processing.`);
     }
   } else {
