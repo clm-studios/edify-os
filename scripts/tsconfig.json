@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "noEmit": true,
+    "baseUrl": "..",
+    "paths": {
+      "@supabase/supabase-js": ["apps/web/node_modules/@supabase/supabase-js"],
+      "@supabase/ssr": ["apps/web/node_modules/@supabase/ssr"],
+      "@anthropic-ai/sdk": ["apps/web/node_modules/@anthropic-ai/sdk"],
+      "pdfkit": ["node_modules/pdfkit"],
+      "@/*": ["apps/web/src/*"]
+    },
+    "typeRoots": [
+      "node_modules/@types",
+      "apps/web/node_modules/@types"
+    ]
+  },
+  "include": ["./**/*.ts"],
+  "exclude": ["../apps/web/node_modules", "../node_modules"]
+}
