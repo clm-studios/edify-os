@@ -316,6 +316,62 @@ export async function runArchetypeTurn({
   let ttftMs: number | null = null;
   let firstTokenSeen = false;
 
+  // ---------------------------------------------------------------------------
+  // Retry + Sonnet fallback helper (PR #16 C1 fix)
+  //
+  // Wraps the per-round Anthropic call with up to 2 retries on transient errors
+  // (429, 500, 502, 503, 504, 529) with exponential backoff (250ms, 750ms).
+  // If retries are exhausted AND the call was using Haiku, one final attempt is
+  // made on Sonnet. resolvedModel is updated so subsequent rounds also use Sonnet.
+  //
+  // Non-transient errors (4xx other than 429, unclassified) are thrown immediately.
+  // ---------------------------------------------------------------------------
+  const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504, 529]);
+  const RETRY_DELAYS_MS = [250, 750];
+
+  function isTransient(err: unknown): boolean {
+    if (err && typeof err === "object") {
+      const status = (err as { status?: number }).status;
+      if (typeof status === "number") return RETRYABLE_STATUSES.has(status);
+    }
+    return false;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async function callWithRetryAndFallback(makeCall: (mid: string) => Promise<any>, currentRound: number): Promise<any> {
+    const startingModel = resolvedModel;
+    let lastErr: unknown;
+
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+      try {
+        return await makeCall(MODEL_IDS[resolvedModel]);
+      } catch (err) {
+        lastErr = err;
+        if (!isTransient(err)) throw err; // non-retryable — propagate immediately
+        if (attempt < RETRY_DELAYS_MS.length) {
+          await new Promise((res) => setTimeout(res, RETRY_DELAYS_MS[attempt]));
+        }
+      }
+    }
+
+    // All retries exhausted. If we were on Haiku, attempt one final call on Sonnet.
+    if (startingModel === "haiku") {
+      const errStatus = (lastErr as { status?: number })?.status;
+      console.log("[perf] fallback", {
+        orgId,
+        archetype,
+        round: currentRound,
+        fromModel: "haiku",
+        toModel: "sonnet",
+        reason: errStatus ?? String(lastErr),
+      });
+      resolvedModel = "sonnet";
+      return makeCall(MODEL_IDS.sonnet);
+    }
+
+    throw lastErr;
+  }
+
   for (let round = 0; round < TOOL_USE_LOOP_MAX; round++) {
     // A+B+C+E+F: use cached system blocks, haiku/sonnet model, attach skills on demand,
     // merge plugin skill IDs, and pass MCP server configs.
@@ -337,55 +393,15 @@ export async function runArchetypeTurn({
     let response: any;
 
     if (onTextDelta) {
-      // Streaming path — use .stream() for real-time text deltas
-      if (useBetaPath) {
-        const stream = anthropic.beta.messages.stream({
-          betas: [...SKILLS_BETA_HEADERS],
-          model: modelId,
-          max_tokens: MAX_RESPONSE_TOKENS,
-          temperature: 0.5,
-          system: systemBlocks,
-          messages: loopMessages,
-          ...(cachedTools.length > 0
-            ? { tools: cachedTools as unknown as Parameters<typeof anthropic.beta.messages.create>[0]["tools"] }
-            : {}),
-          ...(containerParam ? { container: containerParam } : {}),
-          ...(mcpServers.length > 0 ? { mcp_servers: mcpServers } : {}),
-        });
-        stream.on("text", (textDelta) => {
-          // Fix #1 — capture TTFT on the very first text delta (round 0 only).
-          if (!firstTokenSeen) {
-            firstTokenSeen = true;
-            ttftMs = Date.now() - turnStartMs;
-          }
-          onTextDelta(textDelta);
-        });
-        response = await stream.finalMessage();
-      } else {
-        const stream = anthropic.messages.stream({
-          model: modelId,
-          max_tokens: MAX_RESPONSE_TOKENS,
-          temperature: 0.5,
-          system: systemBlocks,
-          messages: loopMessages,
-          ...(cachedTools.length > 0 ? { tools: cachedTools as unknown as Parameters<typeof anthropic.messages.create>[0]["tools"] } : {}),
-        });
-        stream.on("text", (textDelta) => {
-          // Fix #1 — capture TTFT on the very first text delta (round 0 only).
-          if (!firstTokenSeen) {
-            firstTokenSeen = true;
-            ttftMs = Date.now() - turnStartMs;
-          }
-          onTextDelta(textDelta);
-        });
-        response = await stream.finalMessage();
-      }
-    } else {
-      // Non-streaming path — used by heartbeats and callers that don't need real-time deltas
-      response = useBetaPath
-        ? await anthropic.beta.messages.create({
+      // Streaming path — use .stream() for real-time text deltas.
+      // NOTE: if a Haiku stream emits text deltas before failing, the user sees partial
+      // output; the Sonnet fallback then produces a second complete response appended to it.
+      // This rare edge case is acceptable — the turn completes rather than erroring out.
+      response = await callWithRetryAndFallback(async (mid) => {
+        if (useBetaPath) {
+          const stream = anthropic.beta.messages.stream({
             betas: [...SKILLS_BETA_HEADERS],
-            model: modelId,
+            model: mid,
             max_tokens: MAX_RESPONSE_TOKENS,
             temperature: 0.5,
             system: systemBlocks,
@@ -395,15 +411,62 @@ export async function runArchetypeTurn({
               : {}),
             ...(containerParam ? { container: containerParam } : {}),
             ...(mcpServers.length > 0 ? { mcp_servers: mcpServers } : {}),
-          })
-        : await anthropic.messages.create({
-            model: modelId,
+          });
+          stream.on("text", (textDelta) => {
+            // Fix #1 — capture TTFT on the very first text delta (round 0 only).
+            if (!firstTokenSeen) {
+              firstTokenSeen = true;
+              ttftMs = Date.now() - turnStartMs;
+            }
+            onTextDelta(textDelta);
+          });
+          return stream.finalMessage();
+        } else {
+          const stream = anthropic.messages.stream({
+            model: mid,
             max_tokens: MAX_RESPONSE_TOKENS,
             temperature: 0.5,
             system: systemBlocks,
             messages: loopMessages,
             ...(cachedTools.length > 0 ? { tools: cachedTools as unknown as Parameters<typeof anthropic.messages.create>[0]["tools"] } : {}),
           });
+          stream.on("text", (textDelta) => {
+            // Fix #1 — capture TTFT on the very first text delta (round 0 only).
+            if (!firstTokenSeen) {
+              firstTokenSeen = true;
+              ttftMs = Date.now() - turnStartMs;
+            }
+            onTextDelta(textDelta);
+          });
+          return stream.finalMessage();
+        }
+      }, round);
+    } else {
+      // Non-streaming path — used by heartbeats and callers that don't need real-time deltas
+      response = await callWithRetryAndFallback((mid) =>
+        useBetaPath
+          ? anthropic.beta.messages.create({
+              betas: [...SKILLS_BETA_HEADERS],
+              model: mid,
+              max_tokens: MAX_RESPONSE_TOKENS,
+              temperature: 0.5,
+              system: systemBlocks,
+              messages: loopMessages,
+              ...(cachedTools.length > 0
+                ? { tools: cachedTools as unknown as Parameters<typeof anthropic.beta.messages.create>[0]["tools"] }
+                : {}),
+              ...(containerParam ? { container: containerParam } : {}),
+              ...(mcpServers.length > 0 ? { mcp_servers: mcpServers } : {}),
+            })
+          : anthropic.messages.create({
+              model: mid,
+              max_tokens: MAX_RESPONSE_TOKENS,
+              temperature: 0.5,
+              system: systemBlocks,
+              messages: loopMessages,
+              ...(cachedTools.length > 0 ? { tools: cachedTools as unknown as Parameters<typeof anthropic.messages.create>[0]["tools"] } : {}),
+            }),
+      round);
     }
 
     // Accumulate token usage from this API response

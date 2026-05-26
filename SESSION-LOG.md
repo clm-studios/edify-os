@@ -1135,3 +1135,62 @@ Both extract-pending route and onboarding/complete route needed the same fetch+d
 - Added sweep timeout guard in cron bulk path
 - Removed narrating "Step N:" comments in upload route
 
+## 2026-05-25 — feat(chat): intent classifier + Haiku routing for light turns (PR #16)
+
+### What was built
+- `apps/web/src/lib/chat/classify-intent.ts` — new intent classifier helper (215 lines)
+  - `classifyIntent(userMessage, recentHistory, anthropicClient)` → `{ tier: "light" | "deliverable", reason }`
+  - Uses Haiku 4.5, max_tokens 80, temperature 0, 16-example few-shot prompt
+  - Conservative default: uncertain → "deliverable"; API failure → "deliverable" (never degrades quality)
+  - Config knobs: `INTENT_CLASSIFIER_ENABLED` (env var, default true), `INTENT_CLASSIFIER_FALLBACK_TIER` (env var, default "deliverable")
+  - Exports `MODEL_IDS` reference to avoid hardcoding model strings
+- `apps/web/src/lib/chat/run-archetype-turn.ts` — integrates classifier
+  - Classifier runs **in parallel** with `resolveArchetypeTools + buildMcpServersForOrg` → zero latency overhead on turns where DB lookups are the bottleneck
+  - Adds `[perf] intent` log: `{ orgId, archetype, userMessageLen, tier, reason, classifierMs, resolvedModel }`
+  - Adds `model: resolvedModel` to existing `[perf] turn` aggregate log
+  - `MODEL_IDS` exported so classifier can reference it
+
+### /simplify findings fixed
+- Parallelized classifier with tool/MCP resolution (was sequential — classifier would have been on critical path)
+- Exported `MODEL_IDS` from run-archetype-turn + imported in classify-intent (eliminated hardcoded string duplication)
+- Removed redundant `typeof turn.content === "string"` guard (typed as string already)
+
+### Expected TTFT impact
+- Light turns (Haiku routed): ~700-900ms vs Sonnet's ~1500ms baseline
+- Deliverable turns: unchanged at ~1500ms
+- Classifier net overhead: ~0ms (runs in parallel with tool resolution which takes similar time)
+
+### Spot-check accuracy
+- Reference set: 20 examples (10 light, 7 deliverable, 3 borderline)
+- Expected: 19/20 (95%) — borderlines all route to deliverable (correct by conservative rule)
+
+### PR
+- Draft PR #16: https://github.com/clm-studios/edify-os/pull/16
+- Branch: `lopmon/feat-intent-classifier-haiku-routing`
+- Commits: 3 (classifier helper, run-archetype-turn integration, /simplify pass)
+- Status: DRAFT — awaiting Minervamon review before merge
+
+---
+
+## 2026-05-26 — PR #16 C1 fix (retry + Sonnet fallback) — Sonnet coding agent
+
+**What changed**
+- `apps/web/src/lib/chat/run-archetype-turn.ts`: added `callWithRetryAndFallback` helper wrapping all four per-round Anthropic call sites (streaming+beta, streaming+non-beta, non-streaming+beta, non-streaming+non-beta) with retry + Sonnet fallback logic
+
+**Why**
+Minervamon's PR #16 review C1: PR description claimed Sonnet fallback on Haiku failure but the per-round Anthropic call had no retry/fallback. Option (a) per Lopmon — implement the fix.
+
+**Retry policy**
+- Retryable: 429, 500, 502, 503, 504, 529
+- Non-retryable: 4xx (non-429), unclassified errors
+- 2 retries with exponential backoff (250ms, 750ms)
+- After exhausted retries on Haiku, one final attempt on Sonnet + `[perf] fallback` log + `resolvedModel` flips to "sonnet" for remaining rounds
+
+**Files touched**
+- apps/web/src/lib/chat/run-archetype-turn.ts (+114/-51)
+
+**Typecheck**: passed (clean, no errors)
+
+**Next**
+Commit + push to existing branch. PR stays DRAFT. Lopmon will tell Minervamon C1 is in.
+
