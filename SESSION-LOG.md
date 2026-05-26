@@ -1176,3 +1176,25 @@ All clean. No reuse, quality, or efficiency issues in the new code:
 - `handleSignOut` is a simple fire-once click handler, no hot-path or polling concerns
 - Error case: if `signOut()` returns an error (e.g., Supabase not configured), `router.push('/login')` still fires — correct behavior since no valid session exists anyway
 - Pre-existing unused imports (`Sparkles`, `Users`) noted but not in scope of this PR
+
+---
+
+## 2026-05-26 — Cleanup SQL staged for PR #17 stale rows — Sonnet coding agent
+
+**What changed**
+- `scripts/cleanup-stale-proof-library-rows.sql`: NEW, ~195 lines. Staged 4-step cleanup pattern (inventory + keep-set verify + orphan check + transactional DELETE) for ~24 stale `documents` rows left by PR #17 debug runs.
+
+**Why**
+Minervamon's PR #17 review (`outputs/pr17-review.md` lines 134-246 on the PR #17 worktree) flagged that no cleanup query was staged anywhere. Citlali authorized staging on a separate branch (NOT on the PR #17 branch) to keep the seed PR clean and give the cleanup a focused reviewable diff.
+
+**Authorization gate**
+- File is PENDING CITLALI-IN-LOOP AUTHORIZATION. DO NOT RUN.
+- Steps 1-3 are read-only and safe to run as inspection.
+- Step 4 is the transactional DELETE. Wrapped in BEGIN/.../COMMIT, hardcoded org UUID (`e07d3c8d-b921-4cbd-b5db-965c4e0fcbae`), hardcoded 8 filenames.
+- Storage object cleanup (Step 5) is a separate follow-up — see file header.
+
+**Execution channel**
+Supabase SQL editor or psql. No JS runner — less audit surface.
+
+**Next**
+Push branch. Open DRAFT PR. Citlali eyeballs steps + authorizes execution when back at keyboard.
