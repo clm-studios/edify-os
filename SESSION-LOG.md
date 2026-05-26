@@ -1198,3 +1198,24 @@ Supabase SQL editor or psql. No JS runner — less audit surface.
 
 **Next**
 Push branch. Open DRAFT PR. Citlali eyeballs steps + authorizes execution when back at keyboard.
+
+---
+
+## 2026-05-26 — Stale-row inventory packet staged for PR #18 — Sonnet coding agent
+
+**What changed**
+- `outputs/pr17-stale-row-inventory.md`: NEW, ~188 lines. Read-only PostgREST inventory of all rows for the 8 PR #17 filenames in the Edify org. Answers Minervamon's Q1 (uniform entry_count=0?), Q2 (--force usage?), Q3 (cron actively retrying?).
+
+**Method**
+Native fetch() against PostgREST with the service-role key. Two read-only GET requests: one against /rest/v1/documents (filtered by org_id + filename IN list, without parsed_text to reduce payload), one against /rest/v1/memory_entries (for entry_count rollup). No writes.
+
+**Key findings**
+- Total rows: 24 (across 8 filenames, 3 rows each)
+- Stale rows confirmed: 8 (not ~24 as estimated — Minervamon's estimate appears to have conflated total rows with stale rows)
+- Q1 — entry_count uniformity: YES, all 8 stale rows have entry_count=0. Row-only DELETE is safe.
+- Q2 — --force inferred: YES. 7 of 8 filenames have both keep and stale rows sharing the same filename, confirming --force was used on debug runs.
+- Q3 — cron actively retrying: YES — 1 stale row (c6e4871e, spring-2025-newsletter.pdf, status=failed, retry_count=1) is in the cron retry window. Mild urgency on cleanup.
+- Edge case flagged: MEAF-2024-grant-application-FUNDED.pdf has 3 rows all done+entries — the cleanup SQL's dedup logic must target older done rows, not just status!=done rows, for this file.
+
+**Next**
+Push to existing PR #18 branch. Citlali eyeballs packet + decides whether to run Step 4 of the cleanup SQL. Lopmon should flag to Minervamon: (1) stale count is 8 not ~24, (2) 1 row is actively being retried by cron.
