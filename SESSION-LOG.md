@@ -1219,3 +1219,23 @@ Native fetch() against PostgREST with the service-role key. Two read-only GET re
 
 **Next**
 Push to existing PR #18 branch. Citlali eyeballs packet + decides whether to run Step 4 of the cleanup SQL. Lopmon should flag to Minervamon: (1) stale count is 8 not ~24, (2) 1 row is actively being retried by cron.
+
+---
+
+## 2026-05-26 — PR #18 SQL updated for orphan-entries cleanup — Sonnet coding agent
+
+**What changed**
+- `scripts/cleanup-stale-proof-library-rows.sql`: added orphan memory_entries DELETE inside Step 4's BEGIN/COMMIT block (executes before documents DELETE); fixed "~24" → "~16" expected-count comments throughout.
+
+**Why**
+Minervamon's spec (relayed by Citlali's authorization 2026-05-27 00:06 UTC): the 8 older done-with-entries rows being deleted leave ~68 memory_entries orphaned. The original Step 4 only cleaned documents; this update also cleans the memory_entries pointing to deleted doc ids. Comment fix corrects review-time estimate that didn't account for DISTINCT ON keep-latest behavior.
+
+**Order**
+DELETE memory_entries FIRST (rationale: if mid-flight crash, leaves documents intact with no entries — recoverable by re-running extraction; reverse order would leave entries pointing at non-existent doc ids).
+
+**Expected post-execution**
+- documents matching the 8 filenames: 8 (one per filename, latest by created_at)
+- memory_entries with source LIKE 'document:%' (matching kept doc ids): 62 (matches PR #17 final-run total: 2 prior_grants + 50 outcomes + 10 voice_samples)
+
+**Next**
+Phase 2: separate execution agent will run Steps 1-3 read-only snapshot match → execute Step 4 BEGIN/COMMIT block.
