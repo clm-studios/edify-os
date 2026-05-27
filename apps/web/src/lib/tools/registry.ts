@@ -66,6 +66,14 @@ import {
   executeOrgMemoryTool,
   ORG_MEMORY_TOOLS_ADDENDUM,
 } from "@/lib/tools/org-memory";
+import {
+  grantWritingTools,
+  GRANT_WRITING_TOOLS_ADDENDUM,
+} from "@/lib/tools/grant-writing";
+import {
+  executeDraftGrantContent,
+  executeReviseGrantContent,
+} from "@/lib/tools/grant-writing-handlers";
 import { getValidGoogleAccessToken, type GoogleIntegrationType } from "@/lib/google";
 import { ARCHETYPE_SLUGS, type ArchetypeSlug } from "@/lib/archetypes";
 
@@ -91,6 +99,7 @@ export {
   IMPACT_DATA_TOOLS_ADDENDUM,
   CONSULT_TEAMMATE_TOOLS_ADDENDUM,
   ORG_MEMORY_TOOLS_ADDENDUM,
+  GRANT_WRITING_TOOLS_ADDENDUM,
 };
 export type { RenderToolGeneratedFile };
 
@@ -116,6 +125,8 @@ const ORG_MEMORY_TOOL_NAMES = new Set(orgMemoryTools.map((t) => t.name));
 const SEARCH_GRANTS_TOOL_NAMES = new Set(
   searchGrantsTools.map((t) => t.name),
 );
+// grant_writing tools have prefix "draft" / "revise" — pin via name set.
+const GRANT_WRITING_TOOL_NAMES = new Set(grantWritingTools.map((t) => t.name));
 
 // ---------------------------------------------------------------------------
 // System-prompt addendum helpers
@@ -191,6 +202,10 @@ export function getToolFamilies(tools: Anthropic.Tool[]): Set<string> {
       families.add("search_grants");
       continue;
     }
+    if (GRANT_WRITING_TOOL_NAMES.has(t.name)) {
+      families.add("grant_writing");
+      continue;
+    }
     const prefix = t.name.split("_")[0];
     if (prefix) families.add(prefix);
   }
@@ -223,6 +238,7 @@ export function buildSystemAddendums(tools: Anthropic.Tool[]): string {
   if (families.has("impact_data")) parts.push(IMPACT_DATA_TOOLS_ADDENDUM);
   if (families.has("consult_teammate")) parts.push(CONSULT_TEAMMATE_TOOLS_ADDENDUM);
   if (families.has("org_memory")) parts.push(ORG_MEMORY_TOOLS_ADDENDUM);
+  if (families.has("grant_writing")) parts.push(GRANT_WRITING_TOOLS_ADDENDUM);
   return parts.join("");
 }
 
@@ -234,7 +250,7 @@ export function buildSystemAddendums(tools: Anthropic.Tool[]): string {
 export const ARCHETYPE_TOOLS: Record<ArchetypeSlug, Anthropic.Tool[]> = {
   executive_assistant: [...calendarTools, ...gmailTools, ...driveTools, ...memoryTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
   events_director: [...calendarTools, ...driveTools, ...unsplashTools, ...memoryTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
-  development_director: [...calendarTools, ...searchGrantsTools, ...crmTools, ...gmailTools, ...driveTools, ...memoryTools, ...orgMemoryTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
+  development_director: [...calendarTools, ...searchGrantsTools, ...crmTools, ...gmailTools, ...driveTools, ...memoryTools, ...orgMemoryTools, ...grantWritingTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
   marketing_director: [
     ...driveTools,
     ...unsplashTools,
@@ -487,6 +503,21 @@ export async function executeTool({
 
   if (ORG_MEMORY_TOOL_NAMES.has(name)) {
     return executeOrgMemoryTool({ name, input, orgId, serviceClient });
+  }
+
+  if (GRANT_WRITING_TOOL_NAMES.has(name)) {
+    if (!anthropic) {
+      return {
+        content: "Grant writing tools require an Anthropic client; none was provided.",
+        is_error: true,
+      };
+    }
+    if (name === "draft_grant_content") {
+      return executeDraftGrantContent({ input, orgId, serviceClient, anthropic });
+    }
+    if (name === "revise_grant_content") {
+      return executeReviseGrantContent({ input, serviceClient, anthropic });
+    }
   }
 
   return { content: `Unknown tool: ${name}`, is_error: true };

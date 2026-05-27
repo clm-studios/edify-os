@@ -141,10 +141,10 @@ function useStreamBuffer(isStreaming: boolean) {
 // ---------------------------------------------------------------------------
 const SUGGESTED_PROMPTS: Record<string, string[]> = {
   development_director: [
-    "Find grants we're eligible for in youth development",
-    "Draft an LOI for a $25K community foundation grant",
-    "Write a thank-you letter for a major donor",
-    "What grants are due this month?",
+    "Draft an LOI for our top-fit grant this month",
+    "Help me write the statement of need for our workforce program",
+    "What grants are due in the next two weeks?",
+    "Show me my voice samples",
   ],
   marketing_director: [
     "Create a 3-post social media series for our upcoming gala",

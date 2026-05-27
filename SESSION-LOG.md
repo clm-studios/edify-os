@@ -1350,18 +1350,18 @@ Citlali via Minervamon (msg 5831, 2026-05-27 00:06 UTC).
 NOT touched. Separate follow-up (16 orphan storage objects at org-documents/e07d3c8d-b921-4cbd-b5db-965c4e0fcbae/<doc_id>/).
 
 **Next**
-Lopmon will surface counts to Minervamon â†’ Citlali. PR #18 stays DRAFT â€” merge decision is Citlali's.
+Lopmon will surface counts to Minervamon → Citlali. PR #18 stays DRAFT — merge decision is Citlali’s.
 
 ---
 
 ## 2026-05-27 — Storage cleanup follow-up staged — Sonnet coding agent
 
 **What changed**
-- `scripts/cleanup-orphan-storage-objects.ts`: NEW. Stages cleanup of 16 orphan PDFs left by PR #18's DB cleanup at `org-documents/e07d3c8d-b921-4cbd-b5db-965c4e0fcbae/<doc_uuid>/<filename>`.
+- `scripts/cleanup-orphan-storage-objects.ts`: NEW. Stages cleanup of 16 orphan PDFs left by PR #18’s DB cleanup at `org-documents/e07d3c8d-b921-4cbd-b5db-965c4e0fcbae/<doc_uuid>/<filename>`.
 - `apps/web/package.json`: NEW npm script `cleanup-orphan-storage-objects` (mirrors seed script pattern).
 
 **Why**
-Minervamon and Citlali agreed Storage cleanup is a separate follow-up from PR #18's DB cleanup. PR #18 deleted documents rows + memory_entries; this stages the matching Storage object removal. Per the execution log: "Storage object cleanup at org-documents/... is a SEPARATE follow-up. 16 orphan storage objects remain."
+Minervamon and Citlali agreed Storage cleanup is a separate follow-up from PR #18’s DB cleanup. PR #18 deleted documents rows + memory_entries; this stages the matching Storage object removal. Per the execution log: “Storage object cleanup at org-documents/... is a SEPARATE follow-up. 16 orphan storage objects remain.”
 
 **Authorization gate**
 - PENDING CITLALI-IN-LOOP AUTHORIZATION. DO NOT RUN.
@@ -1389,10 +1389,138 @@ Citlali via Minervamon (msg 5844, 2026-05-27 11:36 UTC).
 - Executed at: 2026-05-27T11:44:00.339Z
 
 **Verified via prior dry-run**
-Dry-run run before live execution showed identical 16-path list. MEAF-FUNDED dedup paths (`7d20eda6-a4fa-40e8-8abd-94667c581bd7` + `06afd9ba-10f2-4c68-8a40-4660ade481bb`) both queued correctly per Minervamon's eyeball check.
+Dry-run run before live execution showed identical 16-path list. MEAF-FUNDED dedup paths (`7d20eda6-a4fa-40e8-8abd-94667c581bd7` + `06afd9ba-10f2-4c68-8a40-4660ade481bb`) both queued correctly per Minervamon’s eyeball check.
 
 **Storage cleanup loop**
-Closed. Bucket `org-documents` under org `e07d3c8d-b921-4cbd-b5db-965c4e0fcbae` now has exactly 8 doc-uuid directories matching the 8 keeper documents from PR #17's seed.
+Closed. Bucket `org-documents` under org `e07d3c8d-b921-4cbd-b5db-965c4e0fcbae` now has exactly 8 doc-uuid directories matching the 8 keeper documents from PR #17’s seed.
 
 **Next**
 PR #19 ready for review + merge to main as historical record.
+
+---
+
+# SESSION-LOG — Grant Writing MVP (feat/grant-writing-mvp)
+
+**Identity:** Sonnet coding agent spawned by Lopmon
+**Branch:** `feat/grant-writing-mvp`
+**Worktree:** `C:\Users\Araly\edify-os-grant-writing-mvp`
+**Base:** `origin/main` @ `1d4a912` (intent classifier + Haiku routing, PR #16)
+**Date:** 2026-05-27
+**PRD:** `C:\Users\Araly\life\projects\edify-os\PRD-grant-writing-capability-2026-05-10.md` (590+ lines, Minervamon-authored + Lopmon-revised 2026-05-27)
+
+---
+
+## Plan
+
+Per PRD phasing §MVP:
+1. Migration `00040_grants_pipeline.sql` — grants_pipeline table + extended memory_entries category constraint
+2. Two new tools: `draft_grant_content` + `revise_grant_content`
+3. Three API routes: POST/GET/PATCH for grants pipeline
+4. Memory tool extension: 6 new grant_writing.* categories
+5. Registry integration: Dev Director gains grant-writing tools
+6. Drawer UI + list page at /dashboard/grants
+7. Suggestion chips update for Dev Director chat
+
+---
+
+## Reconnaissance findings
+
+- Highest existing migration: `00039_proof_library_demo_seed.sql` → new file: `00040_grants_pipeline.sql`
+- `current_user_org_ids()` SECURITY DEFINER helper confirmed live in `00028_fix_members_rls_recursion.sql`
+- `getMemoryByCategory` helper at `lib/memory/get-by-category.ts` — clean API for substrate pulls
+- `SuggestionChip` component at `components/ui/suggestion-chip.tsx` — existing pattern used
+- SUGGESTED_PROMPTS for development_director in `TeamChatClient.tsx` — updated 4 chips
+- `save_to_memory` tool in `lib/tools/memory.ts` — extended with 6 new categories
+- Animation keyframes (`animate-fade-in`, `animate-slide-in-right`) confirmed in `globals.css`
+
+---
+
+## Files changed
+
+### NEW files
+- `supabase/migrations/00040_grants_pipeline.sql` — table + RLS + indexes + updated_at trigger + memory_entries category extension
+- `apps/web/src/lib/prompts/grant-writing/loi.ts` — LOI section system prompt (~300 tokens)
+- `apps/web/src/lib/prompts/grant-writing/statement-of-need.ts` — SoN section system prompt
+- `apps/web/src/lib/prompts/grant-writing/project-description.ts` — Project description section system prompt
+- `apps/web/src/lib/prompts/grant-writing/budget-narrative.ts` — Budget narrative section system prompt
+- `apps/web/src/lib/tools/grant-writing.ts` — Tool definitions: draft_grant_content + revise_grant_content
+- `apps/web/src/lib/tools/grant-writing-handlers.ts` — Handlers: substrate-pull, cite-or-reject loop, skillBody forward-compat slot
+- `apps/web/src/app/api/grants/pipeline/route.ts` — GET (list) + POST (create) endpoints
+- `apps/web/src/app/api/grants/pipeline/[id]/route.ts` — PATCH (update status / notes / append draft)
+- `apps/web/src/app/dashboard/grants/page.tsx` — List view with drawer trigger + status/search filters
+- `apps/web/src/components/grants/GrantDetailDrawer.tsx` — Drawer: drafts timeline + attachments checklist stub + notes + actions row
+
+### MODIFIED files
+- `apps/web/src/lib/tools/memory.ts` — Extended MemoryToolCategory + enum + validCategories + CATEGORY_MAP with 6 grant_writing.* categories
+- `apps/web/src/lib/tools/registry.ts` — Import + dispatch + name-set + tool-family detection + addendum for grant_writing family; Dev Director ARCHETYPE_TOOLS gains ...grantWritingTools; GRANT_WRITING_TOOLS_ADDENDUM re-exported
+- `apps/web/src/app/dashboard/team/[slug]/TeamChatClient.tsx` — Dev Director suggestion chips updated to grant-writing-focused prompts per PRD W3
+
+---
+
+## Architecture decisions
+
+- **skillBody forward-compat slot (PRD §F8):** `executeDraftGrantContent` assembles system blocks with an explicit `skillBody` slot (`null` in MVP). When skill-routing pattern ships, the follow-up PRD can thread the skill body string without changing the handler signature.
+- **Cite-or-reject loop:** Detects uncited numbers via regex (2+ digit numbers not within 80 chars of a `[...]` marker). Retries up to 2x with addendum. After retry 3, annotates with `[?] (missing citation)`.
+- **Section-first substrate mapping (PRD §F4):** SUBSTRATE_MAP encodes the P/S/V lookup table for all 4 MVP content types. Voice samples always loaded at V for all types.
+- **Model routing:** Sonnet for all MVP content types. Haiku routing per content_type is v2 perf work (deferred per PRD phasing).
+- **Dedup on POST:** 23505 unique-constraint violation returns existing row + 200 (not 409) so tool callers don’t error on “let’s pursue this” re-calls.
+
+---
+
+## Migration application
+
+**DO NOT apply 00040 to prod until feat/grant-writing-mvp is merged to main.**
+
+Application steps:
+1. Open Supabase SQL Editor for the edifysaas org (Owner via edifysaas@gmail.com)
+2. Paste full contents of `supabase/migrations/00040_grants_pipeline.sql`
+3. Execute — expect: CREATE TABLE, 4 policies, 3 indexes, 1 function, 1 trigger, ALTER TABLE (constraint extension)
+4. Verify: `SELECT count(*) FROM grants_pipeline;` returns 0 (empty, correct)
+5. Verify: `SELECT category FROM memory_entries LIMIT 1;` succeeds (constraint extension live)
+
+---
+
+## Out of scope (v2 deferrals confirmed)
+
+- `draft_full_proposal`, `compile_application` — v2
+- Kanban drag-to-move — v2 (MVP ships list view only)
+- Content types beyond MVP-4 (loi, statement_of_need, project_description, budget_narrative) — v2
+- `import_grant_writing_artifacts` — v2
+- Briefing integration (deadline surfacing) — v2
+- Skill-routing pattern (F8) — separate follow-up PRD
+- Approvals `kind: ‘grant_draft’` enum — registered for v2 (approvals table uses jsonb proposed_action, no enum column to alter)
+
+---
+
+## Typecheck
+
+`pnpm --filter web typecheck` — PASSES (exit 0, clean).
+
+---
+
+## Smoke test notes
+
+Manual smoke test against edifysaas test org: NOT executable without migration 00040 applied. Noted items to verify post-migration:
+- `draft_grant_content` tool visible in Dev Director chat
+- `save_to_memory` with category=”grant_writing.tone_rules” persists correctly
+- POST /api/grants/pipeline creates row; PATCH /api/grants/pipeline/[id] advances status
+- /dashboard/grants renders list view; drawer opens on click; “Talk to Dev” link scoped correctly
+- Suggestion chips in Dev Director chat show new grant-writing prompts
+
+---
+
+## PR
+
+See commit for PR URL. Branch: feat/grant-writing-mvp. DRAFT — do not merge.
+
+---
+
+## 2026-05-27 -- Sidebar nav for /dashboard/grants (PR #21 follow-up) -- Sonnet coding agent
+
+**What changed**
+- apps/web/src/components/sidebar.tsx: added Grants nav entry pointing at /dashboard/grants, lucide icon FileText (already imported), positioned after Tasks and before Ripple in the navLinks array (+1 line in the array)
+
+**Why**
+PR #21 build agent scoped sidebar out per caution rule. Minervamon authorized addition via msg 5851 after migration 00040 applied to prod. Folded into PR #21 branch (small follow-up commit, not separate PR).
+
+**Typecheck**: passed
