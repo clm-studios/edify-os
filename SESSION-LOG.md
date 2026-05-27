@@ -1313,3 +1313,28 @@ Minervamon and Citlali agreed Storage cleanup is a separate follow-up from PR #1
 
 **Next**
 Open as DRAFT PR. Citlali reviews and authorizes when at keyboard.
+
+## 2026-05-27 - PR #19 Storage cleanup EXECUTED - Lopmon terminal-side
+
+**What happened**
+Ran `scripts/cleanup-orphan-storage-objects.ts` against prod Supabase Storage with `--confirm-citlali-auth`. Pre-flight gates passed (24 doc-uuid directories found, 16 orphans PRESENT, 8 keepers OK). Live delete completed.
+
+**Authorization**
+Citlali via Minervamon (msg 5844, 2026-05-27 11:36 UTC).
+
+**Results**
+- Pre-flight directory count: 24
+- Storage objects deleted: 16
+- Post-flight directory count: 8 (expected 8)
+- Delta: 16 (expected: 16) - MATCH
+- Anomalies: none
+- Executed at: 2026-05-27T11:44:00.339Z
+
+**Verified via prior dry-run**
+Dry-run run before live execution showed identical 16-path list. MEAF-FUNDED dedup paths (`7d20eda6-a4fa-40e8-8abd-94667c581bd7` + `06afd9ba-10f2-4c68-8a40-4660ade481bb`) both queued correctly per Minervamon's eyeball check.
+
+**Storage cleanup loop**
+Closed. Bucket `org-documents` under org `e07d3c8d-b921-4cbd-b5db-965c4e0fcbae` now has exactly 8 doc-uuid directories matching the 8 keeper documents from PR #17's seed.
+
+**Next**
+PR #19 ready for review + merge to main as historical record.
