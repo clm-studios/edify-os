@@ -1512,3 +1512,15 @@ Manual smoke test against edifysaas test org: NOT executable without migration 0
 ## PR
 
 See commit for PR URL. Branch: feat/grant-writing-mvp. DRAFT — do not merge.
+
+---
+
+## 2026-05-27 -- Sidebar nav for /dashboard/grants (PR #21 follow-up) -- Sonnet coding agent
+
+**What changed**
+- apps/web/src/components/sidebar.tsx: added Grants nav entry pointing at /dashboard/grants, lucide icon FileText (already imported), positioned after Tasks and before Ripple in the navLinks array (+1 line in the array)
+
+**Why**
+PR #21 build agent scoped sidebar out per caution rule. Minervamon authorized addition via msg 5851 after migration 00040 applied to prod. Folded into PR #21 branch (small follow-up commit, not separate PR).
+
+**Typecheck**: passed

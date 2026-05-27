@@ -39,6 +39,7 @@ const navLinks = [
   { href: '/dashboard/decision-lab', label: 'Decision Lab', icon: FlaskConical },
   { href: '/dashboard/inbox', label: 'Inbox', icon: Inbox },
   { href: '/dashboard/tasks', label: 'Tasks', icon: CheckSquare },
+  { href: '/dashboard/grants', label: 'Grants', icon: FileText },
   { href: '/dashboard/ripple', label: 'Ripple', icon: Waves },
   { href: '/dashboard/memory', label: 'Knowledge Base', icon: Brain },
   { href: '/dashboard/integrations', label: 'Integrations', icon: Plug },
