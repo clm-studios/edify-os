@@ -955,6 +955,48 @@ One quality issue found and fixed: redundant inline comment `// Let the browser 
 - Auth-gated route exclusion covers both navigation AND sub-resource requests (the `.some()` check runs before the `navigate` mode check, so RSC payloads fetched under auth-gated paths are also excluded).
 - No other files touched.
 
+---
+
+## 2026-05-27 — UI skill-lift from Anthropic open-source — Sonnet coding agent
+
+**What changed**
+- `apps/web/plugins/design/frontend-design/` — NEW (lifted from anthropics/skills@690f15cac7f7b4c055c5ab109c79ed9259934081)
+- `apps/web/plugins/design/web-artifacts-builder/` — NEW (lifted from anthropics/skills@690f15cac7f7b4c055c5ab109c79ed9259934081, includes scripts/ with init-artifact.sh, bundle-artifact.sh, shadcn-components.tar.gz)
+- `apps/web/plugins/design/theme-factory/` — ALREADY EXISTS (same content as upstream; no new folder created; existing skill_id `skill_01Vj5Chja2ajdTBSNi2LCEeq` reused in Dev Director registry entry)
+- `apps/web/src/lib/plugins/registry.ts` — added 3 skill keys to `development_director` pool (frontend-design, web-artifacts-builder, theme-factory)
+- `apps/web/src/lib/plugins/intent-detection.ts` — added `design/frontend-design` and `design/web-artifacts-builder` to VENDOR_TO_CATEGORY (category: "marketing")
+- `apps/web/plugins/uploaded-ids.json` — NOT YET UPDATED (upload blocked — see below)
+
+**Source provenance**
+Repo: github.com/anthropics/skills @ 690f15cac7f7b4c055c5ab109c79ed9259934081
+License: Apache 2.0
+Adaptation: SKILL.md content copied verbatim. LICENSE.txt replaced with Edify attribution header ("Apache 2.0 — original source: anthropics/skills@<sha> at github.com/anthropics/skills/<path>") prepended to full Apache 2.0 text.
+
+**Archetype attachment**
+Dev Director only (conservative default). Dev Director pool: 13 skills (3 native always-pinned: grant_proposal_writer, donor_stewardship_sequence, impact_report + 10 vendored intent-scored). With SKILL_CAP=8, 3 native are always sent and 5 vendored slots are filled by intent match. Adding 3 UI skills to the pool means they compete for vendored slots when design intent is detected. No overflow breakage — selectSkillsForMessage() handles pools larger than cap.
+
+**Upload results — BLOCKED, needs Lopmon/Citlali action**
+Dry-run confirmed:
+- frontend-design → would upload (hash: 7f04870dc68328fb)
+- web-artifacts-builder → would upload (hash: f34551ae410d254f)
+- theme-factory → SKIP, already uploaded as skill_01Vj5Chja2ajdTBSNi2LCEeq
+
+ANTHROPIC_API_KEY not found in environment or .env.local on this worktree. This is the standard pattern (same as flyer-wow agent). Live upload must be run by Lopmon/Citlali after merge:
+
+```bash
+cd C:\Users\Araly\edify-os
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+pnpm dlx tsx scripts/upload-plugin-skills.ts
+git add apps/web/plugins/uploaded-ids.json
+git commit -m "chore: record uploaded skill_ids for frontend-design + web-artifacts-builder"
+```
+
+After upload, `design/frontend-design` and `design/web-artifacts-builder` will resolve in the registry and become active for Dev Director. Until then, `resolve()` returns `undefined` and `.filter(Boolean)` silently excludes them (no runtime error).
+
+**TypeScript check:** passed clean (pnpm --filter web typecheck — exit 0)
+
+**Next**: open DRAFT PR, awaits Minervamon re-review + Lopmon upload run after merge.
+
 ### Notes
 
 - PR #12 is DRAFT. Minervamon reviews + smokes before merge.

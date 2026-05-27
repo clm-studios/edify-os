@@ -71,10 +71,13 @@ export const VENDOR_TO_CATEGORY: Record<string, keyof typeof VENDOR_INTENT_PATTE
   "marketing/campaign-plan": "marketing",
   "marketing/draft-content": "marketing",
   "marketing/brand-review": "marketing",
-  // design/* (vendored ones — design-critique, canvas-design, theme-factory)
+  // design/* (vendored ones — design-critique, canvas-design, theme-factory,
+  //           and Anthropic open-source: frontend-design, web-artifacts-builder)
   "design/design-critique": "marketing",
   "design/canvas-design": "marketing",
   "design/theme-factory": "marketing",
+  "design/frontend-design": "marketing",
+  "design/web-artifacts-builder": "marketing",
   // human-resources/* family (vendored T1)
   "human-resources/onboarding": "hr",
   "human-resources/interview-prep": "hr",
