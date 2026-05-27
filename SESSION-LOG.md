@@ -1239,3 +1239,36 @@ DELETE memory_entries FIRST (rationale: if mid-flight crash, leaves documents in
 
 **Next**
 Phase 2: separate execution agent will run Steps 1-3 read-only snapshot match → execute Step 4 BEGIN/COMMIT block.
+
+## 2026-05-26 — PR #18 cleanup EXECUTED — Sonnet coding agent
+
+**What happened**
+Ran scripts/cleanup-stale-proof-library-rows.sql against prod via PostgREST sequential (Path B — psql not available on this Windows machine).
+
+**Authorization**
+Citlali via Minervamon (msg 5831, 2026-05-27 00:06 UTC).
+
+**Results**
+- memory_entries deleted: 68
+- documents deleted: 16
+- documents remaining (8 filenames): 8 (expected 8)
+- memory_entries remaining (kept doc IDs): 62 (expected 62)
+- Transaction state: COMMITTED (PostgREST sequential)
+- Keepers (one per filename, latest by created_at):
+  - 9c564dd6 2024-impact-report-board-edition.pdf (entries=16)
+  - e1f324e6 2025-Q1-programs-brief.pdf (entries=11)
+  - 2e220d0e DDCF-2024-grant-application-DECLINED.pdf (entries=1)
+  - d1dd3282 MEAF-2024-grant-application-FUNDED.pdf (entries=1)
+  - 267a5356 MEAF-Q4-2024-funder-report.pdf (entries=9)
+  - 5d5c00ac mission-about-and-campaign-copy.pdf (entries=5)
+  - fb9b34e0 spring-2025-newsletter.pdf (entries=5)
+  - 1dcf96d9 workforce-prep-pilot-outcomes-memo.pdf (entries=14)
+
+**Audit artifact**
+`outputs/pr18-execution-log.md`
+
+**Storage cleanup**
+NOT touched. Separate follow-up (16 orphan storage objects at org-documents/e07d3c8d-b921-4cbd-b5db-965c4e0fcbae/<doc_id>/).
+
+**Next**
+Lopmon will surface counts to Minervamon → Citlali. PR #18 stays DRAFT — merge decision is Citlali's.
