@@ -11,6 +11,9 @@
     "clean": "turbo run clean"
   },
   "devDependencies": {
+    "@types/pdfkit": "^0.13.9",
+    "pdfkit": "^0.15.2",
+    "tsx": "^4.21.0",
     "turbo": "^2.4.0",
     "typescript": "^5.7.0"
   },

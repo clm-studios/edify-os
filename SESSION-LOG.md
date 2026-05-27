@@ -1177,6 +1177,27 @@ All clean. No reuse, quality, or efficiency issues in the new code:
 - Error case: if `signOut()` returns an error (e.g., Supabase not configured), `router.push('/login')` still fires — correct behavior since no valid session exists anyway
 - Pre-existing unused imports (`Sparkles`, `Users`) noted but not in scope of this PR
 
+## 2026-05-26 — PR #17 review fixes (M1 + M2 + m3) — Sonnet coding agent
+
+**What changed**
+- `scripts/seed-proof-library-clm.ts`: M1 delete-before-insert dedup in extractSingleDocDirect, M2 poll-timeout Date.now()-Date.now() → Date.now()-startTime, m3 required --org-id flag with UUID validation and orgs-table existence check replacing name-prefix inference
+
+**Why**
+Minervamon's PR #17 review (`outputs/pr17-review.md`) flagged M1 (re-extraction duplicate memory_entries), M2 (Date.now()-Date.now() poll-timeout warning typo at line 939), m3 (org resolution by name-prefix inference instead of explicit --org-id). All three are same-file script-hygiene fixes; Citlali authorized bundling via Minervamon.
+
+**Fixes**
+- M1: delete-before-insert dedup in extractSingleDocDirect (idempotency guard for re-runs on partial-failure rows)
+- M2: Date.now() - Date.now() → Date.now() - startTime
+- m3: required --org-id <uuid> flag; UUID format validation + orgs-table existence check; name-prefix inference removed
+
+**Deferred follow-up (tracked here so it doesn't fall off)**
+- M3: `retry_count: 1` is hard-coded on failure writes at lines 568, 605, 622, 653. PR #14's cron sweeper caps retries at `>= 3`; setting literal 1 silently resets the count. Fix in a follow-up PR — should increment from the current value rather than hard-code.
+
+**Typecheck**: passed (both `pnpm --filter web typecheck` and `npx tsc --noEmit -p scripts/tsconfig.json`)
+
+**Next**
+Commit + push to existing branch. PR stays DRAFT. Awaits Minervamon's re-review on M1/M2 + Citlali's cleanup auth.
+
 ---
 
 ## 2026-05-26 — Cleanup SQL staged for PR #17 stale rows — Sonnet coding agent
