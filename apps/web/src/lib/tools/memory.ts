@@ -24,7 +24,14 @@ export type MemoryToolCategory =
   | "policy"
   | "person"
   | "values"
-  | "other";
+  | "other"
+  // Grant writing MVP: Dev Director grant-writing overlay categories
+  | "grant_writing.tone_rules"
+  | "grant_writing.style_samples"
+  | "grant_writing.preferred_section_lengths"
+  | "grant_writing.signatory_default"
+  | "grant_writing.indirect_rate_default"
+  | "grant_writing_artifact";
 
 /** Maps the simplified tool-facing categories to the DB's MemoryEntryCategory values. */
 const CATEGORY_MAP: Record<MemoryToolCategory, string> = {
@@ -33,6 +40,13 @@ const CATEGORY_MAP: Record<MemoryToolCategory, string> = {
   person: "contacts",
   values: "brand_voice",
   other: "general",
+  // Grant writing categories map 1:1 (stored verbatim in DB)
+  "grant_writing.tone_rules": "grant_writing.tone_rules",
+  "grant_writing.style_samples": "grant_writing.style_samples",
+  "grant_writing.preferred_section_lengths": "grant_writing.preferred_section_lengths",
+  "grant_writing.signatory_default": "grant_writing.signatory_default",
+  "grant_writing.indirect_rate_default": "grant_writing.indirect_rate_default",
+  "grant_writing_artifact": "grant_writing_artifact",
 };
 
 // ---------------------------------------------------------------------------
@@ -58,9 +72,21 @@ export const memoryTools: Anthropic.Tool[] = [
         },
         category: {
           type: "string",
-          enum: ["program", "policy", "person", "values", "other"],
+          enum: [
+            "program",
+            "policy",
+            "person",
+            "values",
+            "other",
+            "grant_writing.tone_rules",
+            "grant_writing.style_samples",
+            "grant_writing.preferred_section_lengths",
+            "grant_writing.signatory_default",
+            "grant_writing.indirect_rate_default",
+            "grant_writing_artifact",
+          ],
           description:
-            "Category: 'program' (a service or initiative), 'policy' (a rule or guideline), 'person' (a staff member, board member, or volunteer), 'values' (org culture, brand voice), 'other'. Defaults to 'other'.",
+            "Category: 'program' (a service or initiative), 'policy' (a rule or guideline), 'person' (a staff member, board member, or volunteer), 'values' (org culture, brand voice), 'other'. Grant writing categories: 'grant_writing.tone_rules' (hard tone constraints like 'never use leverage'), 'grant_writing.style_samples' (past successful proposal excerpts for voice training), 'grant_writing.preferred_section_lengths' (e.g. 'statement_of_need = 600 words'), 'grant_writing.signatory_default' (ED name + title for cover letters), 'grant_writing.indirect_rate_default' (indirect cost rate and phrasing for budget narratives), 'grant_writing_artifact' (full past LOIs or proposals). Defaults to 'other'.",
         },
       },
       required: ["key", "value"],
@@ -102,7 +128,12 @@ export async function executeMemoryTool({
     return { content: "value is required and must be a non-empty string.", is_error: true };
   }
 
-  const validCategories: MemoryToolCategory[] = ["program", "policy", "person", "values", "other"];
+  const validCategories: MemoryToolCategory[] = [
+    "program", "policy", "person", "values", "other",
+    "grant_writing.tone_rules", "grant_writing.style_samples",
+    "grant_writing.preferred_section_lengths", "grant_writing.signatory_default",
+    "grant_writing.indirect_rate_default", "grant_writing_artifact",
+  ];
   const category = validCategories.includes(rawCategory) ? rawCategory : "other";
   const dbCategory = CATEGORY_MAP[category];
 
