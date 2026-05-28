@@ -1511,7 +1511,7 @@ Manual smoke test against edifysaas test org: NOT executable without migration 0
 
 ## PR
 
-See commit for PR URL. Branch: feat/grant-writing-mvp. DRAFT — do not merge.
+See commit for PR URL. Branch: feat/grant-writing-mvp. DRAFT — do not merge. (PR #21 merged 2026-05-28)
 
 ---
 
@@ -1634,4 +1634,4 @@ Fix 4 demo-blocking defects from Minervamon's post-merge review of PR #21:
 
 ## PR
 
-To be filled after `gh pr create`.
+https://github.com/clm-studios/edify-os/pull/22 — OPEN, ready-for-review. Do NOT auto-merge. Minervamon reviews before merge.
