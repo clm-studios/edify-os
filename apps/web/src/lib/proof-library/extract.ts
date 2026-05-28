@@ -22,6 +22,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import Anthropic from "@anthropic-ai/sdk";
 import { decryptIfEncrypted, CRYPTO_LABEL_ANTHROPIC_KEY } from "@/lib/crypto";
+import { MODEL_IDS } from "@/lib/chat/run-archetype-turn";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -383,7 +384,7 @@ async function extractSingleDocument(
   let responseText: string;
   try {
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-5",
+      model: MODEL_IDS.sonnet,
       max_tokens: 4096,
       messages: [{ role: "user", content: prompt }],
     });

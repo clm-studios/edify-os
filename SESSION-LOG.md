@@ -1524,3 +1524,114 @@ See commit for PR URL. Branch: feat/grant-writing-mvp. DRAFT — do not merge.
 PR #21 build agent scoped sidebar out per caution rule. Minervamon authorized addition via msg 5851 after migration 00040 applied to prod. Folded into PR #21 branch (small follow-up commit, not separate PR).
 
 **Typecheck**: passed
+
+---
+
+# SESSION-LOG — PR #21 Demo-Blockers Patch (feat/grant-writing-mvp-patch)
+
+**Identity:** Sonnet coding agent spawned by Lopmon
+**Branch:** `feat/grant-writing-mvp-patch`
+**Worktree:** `C:\Users\Araly\edify-os-grant-mvp-patch`
+**Base:** `origin/main` @ `a38074b`
+**Date:** 2026-05-28
+**PRD:** `C:\Users\Araly\life\projects\edify-os\prd-pr21-demo-blockers-patch.md`
+**Source review:** `outputs/pr21-post-merge-review.md`
+
+---
+
+## Plan
+
+Fix 4 demo-blocking defects from Minervamon's post-merge review of PR #21:
+- C1: Wire onClick + content_md expand in GrantDetailDrawer drafts timeline; fix `key={i}`
+- C2: Replace hardcoded `"claude-sonnet-4-5"` with `MODEL_IDS.sonnet` in grant-writing-handlers.ts (both sites) + extract.ts (optional, included as trivial swap)
+- C3: Add quoted-phrase detector to `detectUncitedClaims` + `annotateMissingCitations`
+- Org-display: Investigate NULL mission / "Test Org Minervamon" / dashboard redirect wedge; fix or document
+
+---
+
+## Reconnaissance
+
+### C1 — Confirmed lines 277-294 in GrantDetailDrawer.tsx
+- `<li key={i}>` has no `onClick`; `ChevronRight` never toggles; `draft.content_md` never rendered
+- `GrantDraft` type confirmed: `section, content_md, version, drafted_at, drafted_by_tool`
+
+### C2 — Confirmed lines 355 + 444 in grant-writing-handlers.ts
+- Both `anthropic.messages.create` calls had `model: "claude-sonnet-4-5"` (string literals)
+- `MODEL_IDS` exported from `@/lib/chat/run-archetype-turn` at line 44: `{ sonnet: "claude-sonnet-4-6", haiku: "..." }`
+- `extract.ts:386` — same trivial swap; included
+
+### C3 — Confirmed detectUncitedClaims (lines 223-244) + annotateMissingCitations (lines 247+)
+- Only `numberPattern` exists; no quoted-phrase detection despite doc comment claiming both
+- No test harness in repo (no `*.test.ts` files in apps/web)
+
+### Org-display — Root cause investigation
+
+**Symptom:** Dashboard routes redirect to `/dashboard/briefing`; UI shows "Test Org Minervamon" + placeholder mission
+
+**Root cause (confirmed, two parts):**
+
+**Part A — Redirect wedge:** The middleware gate at `middleware.ts:70-85` is COOKIE-DRIVEN — it checks `edify_briefing_done` cookie, NOT `mission`. The prod org has `onboarding_completed_at = NULL` because the briefing wizard was never completed for `edifysaas@gmail.com`. The cookie was never written. Any authenticated user hitting `/dashboard/*` without the cookie redirects to `/dashboard/briefing`. This is **correct middleware behavior** — the redirect is intentional.
+
+**The code bug:** `briefing/page.tsx` `checkOrgMembership` useEffect only checks for `member` row existence (not `onboarding_completed_at`). Users whose briefing IS complete in the DB but whose 7-day cookie expired would be forced to redo the briefing form (which returns 409 and still sets the cookie on re-submit — not blocked, just surprising). Added a **cookie-recovery path**: if `onboarding_completed_at` is set, auto-write the cookie and redirect to `/dashboard`. This closes the expired-cookie trap.
+
+**Part B — "Test Org Minervamon":** NOT in code. "Test Org Minervamon" is stored in localStorage `edify_org_context` from Minervamon's smoke test. It's not rendered from the DB anywhere in the codebase (`grep` found no hardcoded string). The briefing form pre-populates from `edify_briefing_draft` localStorage key; the sidebar/shell renders the Supabase `user_metadata.full_name` (not org name). This is **environmental** — stale localStorage from smoke testing.
+
+**Part C — NULL mission:** Mission is never read by the middleware or the briefing gate. NULL mission does NOT block navigation. The briefing gate is purely cookie-driven. The redirect to `/dashboard/briefing` happens because `edify_briefing_done` cookie was absent, not because mission is NULL.
+
+**Fix chosen (option a — code fix):** Added cookie-recovery path in `briefing/page.tsx` — checks `orgs.onboarding_completed_at` on mount; if already set (briefing complete), auto-sets cookie + redirects without showing form. This handles the "cookie expired" trap for real returning users. Does NOT fix the prod org's missing `onboarding_completed_at` — that's a content/flow decision for Minervamon/Citlali (they need to run through the briefing wizard once on the edifysaas account).
+
+---
+
+## Code changes
+
+### C1 — `apps/web/src/components/grants/GrantDetailDrawer.tsx`
+- Added `ChevronDown` import
+- Added `expandedDraftKey` state (tracks which draft row is expanded)
+- Rewrote drafts `<ul>` map:
+  - Key changed from `i` → `` `${draft.version}-${draft.drafted_at}` ``
+  - `<li>` now contains a `<button>` (onClick toggles expansion)
+  - `ChevronRight` → `ChevronDown` when expanded
+  - Collapsible `<div>` with `whitespace-pre-wrap` renders `draft.content_md` below the metadata row
+  - `aria-expanded` set on the button
+
+### C2 — `apps/web/src/lib/tools/grant-writing-handlers.ts`
+- Added `import { MODEL_IDS } from "@/lib/chat/run-archetype-turn"`
+- Replaced both `model: "claude-sonnet-4-5"` → `model: MODEL_IDS.sonnet` (lines ~355 and ~444)
+
+### C2 (optional) — `apps/web/src/lib/proof-library/extract.ts`
+- Added `import { MODEL_IDS } from "@/lib/chat/run-archetype-turn"`
+- Replaced `model: "claude-sonnet-4-5"` at line 386 → `model: MODEL_IDS.sonnet`
+
+### C3 — `apps/web/src/lib/tools/grant-writing-handlers.ts`
+- `detectUncitedClaims`: added `quotePattern` (`/"([^"]{20,})"/g` plus curly-quote variants via `[""]...[""]/g`) with same ±80-char citation-window check; pushes issue with truncated phrase preview
+- `annotateMissingCitations`: added second `result.replace()` pass for quoted phrases ≥20 chars (straight + curly quotes), same citation-window check; appends `[?] _(missing citation)_` after uncited quoted phrases
+
+### Org-display — `apps/web/src/app/dashboard/briefing/page.tsx`
+- Extended `checkOrgMembership` useEffect to also fetch `orgs(onboarding_completed_at, name)` via the members join
+- Added cookie-recovery: if `onboarding_completed_at` is set → write cookie + `router.replace('/dashboard')`
+- Documented WHY in inline comment
+
+---
+
+## Checks
+
+- `pnpm typecheck` (turbo, 4 packages): **PASSED** (4/4 green)
+- `pnpm lint`: no lint script in apps/web — lint coverage via TypeScript strictness only (consistent with every prior agent in this log)
+- `pnpm --filter web build`: **PASSED** (123/123 pages, no TS errors, no lint errors in build output)
+- No test harness in repo — C3 quoted-phrase detection is verified by reading the regex logic only
+
+---
+
+## Notes
+
+- No DB migrations. No prod DB writes. No new dependencies.
+- No visual changes except C1 expand behavior (reuses existing CSS tokens/classes).
+- `eslint-disable` / `@ts-ignore` NOT used. The one `any` cast in briefing/page.tsx matches the pre-existing pattern in the same file (Supabase join return type narrowing) and is commented.
+- "Test Org Minervamon" is localStorage-only (environmental) — no code change needed. Minervamon should clear `edify_org_context` + `edify_briefing_draft` from browser localStorage on the edifysaas session.
+- Prod org fix: Minervamon/Citlali should log in to edifysaas@gmail.com on Edify, complete the briefing wizard with real org data (name="Edify", mission as appropriate), which will set `onboarding_completed_at` and the cookie.
+
+---
+
+## PR
+
+To be filled after `gh pr create`.

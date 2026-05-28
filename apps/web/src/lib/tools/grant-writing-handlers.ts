@@ -30,6 +30,7 @@ import { PROJECT_DESCRIPTION_SECTION_PROMPT } from "@/lib/prompts/grant-writing/
 import { BUDGET_NARRATIVE_SECTION_PROMPT } from "@/lib/prompts/grant-writing/budget-narrative";
 import type { MvpContentType, GrantContentType, RevisionTone } from "./grant-writing";
 import { MVP_CONTENT_TYPES } from "./grant-writing";
+import { MODEL_IDS } from "@/lib/chat/run-archetype-turn";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -220,6 +221,8 @@ async function buildSubstrate(
 
 // Detects digits not near a [N] or [entry_id] marker.
 // A number within 60 chars of a citation marker is considered cited.
+// Also detects quoted phrases (≥20 chars) not near a citation — these are
+// likely voice samples or external data that require a source.
 function detectUncitedClaims(draft: string): string[] {
   const issues: string[] = [];
 
@@ -240,12 +243,26 @@ function detectUncitedClaims(draft: string): string[] {
     }
   }
 
+  // Find quoted phrases ≥20 chars (straight quotes and curly/typographer variants)
+  const quotePattern = /(?:[""]([^""]{20,})[""]|"([^"]{20,})")/g;
+  while ((match = quotePattern.exec(draft)) !== null) {
+    const pos = match.index;
+    const phrase = match[1] ?? match[2] ?? "";
+    const window = draft.slice(Math.max(0, pos - 80), pos + 80);
+    const hasCitation = /\[\w[\w-]*\]|\[\d+\]/.test(window);
+    if (!hasCitation) {
+      issues.push(`Quoted phrase "${phrase.slice(0, 40)}${phrase.length > 40 ? "…" : ""}" at position ${pos} appears uncited`);
+    }
+  }
+
   return issues;
 }
 
-// Annotate uncited claims with [?] marker after the number
+// Annotate uncited claims with [?] marker after the number or quoted phrase.
+// Handles both numeric statistics and quoted voice-sample phrases (≥20 chars).
 function annotateMissingCitations(draft: string): string {
-  return draft.replace(/\b(\d{2,}(?:[,]\d{3})*(?:\.\d+)?%?)\b/g, (match, num, offset) => {
+  // First pass: annotate uncited numbers
+  let result = draft.replace(/\b(\d{2,}(?:[,]\d{3})*(?:\.\d+)?%?)\b/g, (match, num, offset) => {
     // Skip years
     const clean = num.replace(/[,%]/g, "");
     if (clean.length === 4 && (clean.startsWith("19") || clean.startsWith("20"))) return match;
@@ -254,6 +271,16 @@ function annotateMissingCitations(draft: string): string {
     if (!hasCitation) return `${match} [?] _(missing citation)_`;
     return match;
   });
+
+  // Second pass: annotate uncited quoted phrases (≥20 chars, straight + curly quotes)
+  result = result.replace(/(?:[""]([^""]{20,})[""]|"([^"]{20,})")/g, (match, _p1, _p2, offset) => {
+    const window = result.slice(Math.max(0, offset - 80), offset + 80);
+    const hasCitation = /\[\w[\w-]*\]|\[\d+\]/.test(window);
+    if (!hasCitation) return `${match} [?] _(missing citation)_`;
+    return match;
+  });
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -352,7 +379,7 @@ export async function executeDraftGrantContent({
 
     try {
       const response = await anthropic.messages.create({
-        model: "claude-sonnet-4-5",
+        model: MODEL_IDS.sonnet,
         max_tokens: 2048,
         system: systemBlocks as Anthropic.TextBlockParam[],
         messages,
