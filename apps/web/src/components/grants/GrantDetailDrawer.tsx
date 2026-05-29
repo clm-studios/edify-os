@@ -21,6 +21,7 @@ import {
   X,
   ExternalLink,
   ChevronRight,
+  ChevronDown,
   FileText,
   CheckSquare,
   Square,
@@ -123,6 +124,8 @@ export function GrantDetailDrawer({
   const [notes, setNotes] = useState(grant?.notes ?? "");
   const [notesSaving, setNotesSaving] = useState(false);
   const notesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks which draft row is expanded; key = `${version}-${drafted_at}`
+  const [expandedDraftKey, setExpandedDraftKey] = useState<string | null>(null);
 
   // Sync notes when grant changes
   useEffect(() => {
@@ -274,22 +277,44 @@ export function GrantDetailDrawer({
               </p>
             ) : (
               <ul className="space-y-2">
-                {[...grant.drafts].reverse().map((draft, i) => (
-                  <li
-                    key={i}
-                    className="flex items-center justify-between rounded-lg border border-[var(--line-2)] bg-[var(--bg-2)] px-3 py-2.5"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-[var(--fg-1)]">
-                        v{draft.version} · {draft.section.replace(/_/g, " ")}
-                      </p>
-                      <p className="text-xs text-[var(--fg-3)]">
-                        {formatRelative(draft.drafted_at)} · {draft.drafted_by_tool}
-                      </p>
-                    </div>
-                    <ChevronRight className="h-4 w-4 shrink-0 text-[var(--fg-4)]" />
-                  </li>
-                ))}
+                {[...grant.drafts].reverse().map((draft) => {
+                  const draftKey = `${draft.version}-${draft.drafted_at}`;
+                  const isExpanded = expandedDraftKey === draftKey;
+                  return (
+                    <li
+                      key={draftKey}
+                      className="rounded-lg border border-[var(--line-2)] bg-[var(--bg-2)]"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setExpandedDraftKey(isExpanded ? null : draftKey)}
+                        className="flex w-full items-center justify-between px-3 py-2.5 text-left"
+                        aria-expanded={isExpanded}
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-[var(--fg-1)]">
+                            v{draft.version} · {draft.section.replace(/_/g, " ")}
+                          </p>
+                          <p className="text-xs text-[var(--fg-3)]">
+                            {formatRelative(draft.drafted_at)} · {draft.drafted_by_tool}
+                          </p>
+                        </div>
+                        {isExpanded ? (
+                          <ChevronDown className="h-4 w-4 shrink-0 text-[var(--fg-4)]" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 shrink-0 text-[var(--fg-4)]" />
+                        )}
+                      </button>
+                      {isExpanded && draft.content_md && (
+                        <div className="border-t border-[var(--line-2)] px-3 py-3">
+                          <p className="whitespace-pre-wrap text-xs text-[var(--fg-2)] leading-relaxed">
+                            {draft.content_md}
+                          </p>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>

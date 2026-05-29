@@ -68,6 +68,12 @@ export default function BriefingPage() {
   // This prevents a no-org user from filling the 4-step form only to hit a
   // 403 from /api/onboarding/complete. The form is hidden (checkingOrg=true)
   // until the check resolves, so there's no form flash.
+  //
+  // Cookie-recovery path: if onboarding_completed_at is already set in the DB
+  // (user completed briefing previously) but the edify_briefing_done cookie is
+  // absent (expired or cleared), skip the form, re-write the cookie, and
+  // redirect to /dashboard. This prevents a completed-briefing user from being
+  // stuck re-filling the form every time the cookie expires.
   useEffect(() => {
     async function checkOrgMembership() {
       const supabase = createClient();
@@ -85,12 +91,21 @@ export default function BriefingPage() {
         }
         const { data: member } = await supabase
           .from('members')
-          .select('id')
+          .select('id, org_id, orgs(onboarding_completed_at, name)')
           .eq('user_id', user.id)
           .maybeSingle();
         if (!member) {
           // No org row — route to /onboarding to create one first.
           router.replace('/onboarding');
+          return;
+        }
+        // Cookie-recovery: if briefing is already done in DB but cookie is gone,
+        // re-write the cookie and redirect rather than showing the form again.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const org = (member as any).orgs as { onboarding_completed_at: string | null; name: string } | null;
+        if (org?.onboarding_completed_at) {
+          document.cookie = `${BRIEFING_DONE_COOKIE}=true; path=/; max-age=${60 * 60 * 24 * 7}; samesite=lax`;
+          router.replace('/dashboard');
           return;
         }
       } catch {
