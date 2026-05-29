@@ -1635,3 +1635,5 @@ Fix 4 demo-blocking defects from Minervamon's post-merge review of PR #21:
 ## PR
 
 https://github.com/clm-studios/edify-os/pull/22 — OPEN, ready-for-review. Do NOT auto-merge. Minervamon reviews before merge.
+
+## 2026-05-28 — PR #22 patch: revise-call model literal (line ~471) missed in first pass — fixed by second agent (commit 78885d6)
