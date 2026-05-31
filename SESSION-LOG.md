@@ -1637,3 +1637,18 @@ Fix 4 demo-blocking defects from Minervamon's post-merge review of PR #21:
 https://github.com/clm-studios/edify-os/pull/22 — OPEN, ready-for-review. Do NOT auto-merge. Minervamon reviews before merge.
 
 ## 2026-05-28 — PR #22 patch: revise-call model literal (line ~471) missed in first pass — fixed by second agent (commit 78885d6)
+
+---
+
+# SESSION-LOG — feat: Mailchimp integration for Marketing Director
+
+**Identity:** Sonnet coding agent (spawned by Lopmon)
+**Branch:** `feat/mailchimp-marketing-director`
+**Worktree:** `C:\Users\Araly\edify-os\.claude\worktrees\agent-a2fb676a0b23ad064`
+**Base:** `origin/main` @ `3274105`
+**Date:** 2026-05-30
+**Task:** Add Mailchimp BYOK integration for the Marketing Director archetype (3 layers: connect path, tools, registry wiring). PRD: `~/life/projects/edify-os/prd-mailchimp-marketing-director-2026-05-30.md`.
+
+## Status: STARTED
+
+Reconnaissance complete. Starting implementation of all 3 layers.

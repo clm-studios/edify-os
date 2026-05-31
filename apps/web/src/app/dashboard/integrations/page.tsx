@@ -47,6 +47,7 @@ import {
 } from 'react-icons/si';
 import { AGENT_COLORS, type AgentRoleSlug } from '@/lib/agent-colors';
 import { OAuthModal, type AnyIcon } from './components/OAuthModal';
+import { ApiKeyModal } from './components/ApiKeyModal';
 import { PermissionsInfo } from './components/PermissionsInfo';
 
 /* ------------------------------------------------------------------ */
@@ -213,9 +214,10 @@ const INTEGRATIONS: IntegrationEntry[] = [
     category: 'marketing',
     description: 'Connect Mailchimp so your Marketing Director can manage your email campaigns, newsletters, and audience segments.',
     icon: SiMailchimp,
-    capabilities: ['Create and send campaigns', 'Manage audience segments', 'View campaign performance', 'Run A/B tests'],
+    capabilities: ['Draft email campaigns for your review', 'Manage audience lists and subscribers', 'View campaign performance and reports', 'Add and update subscriber profiles'],
     agentsUsing: [marketing],
-    connectionType: 'oauth',
+    connectionType: 'api_key',
+    configFields: [{ name: 'api_key', label: 'API Key', type: 'password', placeholder: 'Paste your Mailchimp API key (ends in -usNN)', required: true }],
   },
   {
     id: 'constant_contact',
@@ -656,6 +658,14 @@ function hasRealOAuthFlow(id: string): boolean {
   return GOOGLE_INTEGRATION_IDS.has(id) || COMPOSIO_INTEGRATION_IDS.has(id) || CANVA_INTEGRATION_IDS.has(id);
 }
 
+/**
+ * API-key integrations that have a real server-side connect endpoint.
+ * Maps integration id → POST endpoint that accepts the key fields as JSON.
+ */
+const API_KEY_CONNECT_ENDPOINTS: Record<string, string> = {
+  mailchimp: '/api/integrations/mailchimp/connect',
+};
+
 function IntegrationsPageInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -671,6 +681,8 @@ function IntegrationsPageInner() {
   const [canvaEmail, setCanvaEmail] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [oauthModalId, setOauthModalId] = useState<string | null>(null);
+  /** Integration id that is being connected via the ApiKeyModal flow. */
+  const [apiKeyModalId, setApiKeyModalId] = useState<string | null>(null);
   const [configValues, setConfigValues] = useState<Record<string, Record<string, string>>>({});
   const [toast, setToast] = useState<{ message: string; kind: 'success' | 'error' } | null>(null);
   const [celebrationMessage, setCelebrationMessage] = useState<string | null>(null);
@@ -717,6 +729,25 @@ function IntegrationsPageInner() {
   }, []);
 
   useEffect(() => { loadCanvaStatus(); }, [loadCanvaStatus]);
+
+  /* ---------- load Mailchimp connection status ---------- */
+
+  useEffect(() => {
+    async function loadMailchimpStatus() {
+      try {
+        const res = await fetch('/api/integrations');
+        if (!res.ok) return;
+        const data = await res.json() as { connected: Array<{ integrationId: string }> };
+        const mailchimpRow = data.connected?.find((c) => c.integrationId === 'mailchimp');
+        if (mailchimpRow) {
+          setConnected((prev) => new Set([...prev, 'mailchimp']));
+        }
+      } catch {
+        // Non-fatal — UI degrades to disconnected state
+      }
+    }
+    loadMailchimpStatus();
+  }, []);
 
   /* ---------- load Composio (social) connection status ---------- */
 
@@ -881,6 +912,12 @@ function IntegrationsPageInner() {
       return;
     }
 
+    // API-key integrations with a real server endpoint — use the ApiKeyModal
+    if (integration.connectionType === 'api_key' && id in API_KEY_CONNECT_ENDPOINTS) {
+      setApiKeyModalId(id);
+      return;
+    }
+
     if (integration.connectionType === 'oauth') {
       setOauthModalId(id);
     } else {
@@ -890,6 +927,11 @@ function IntegrationsPageInner() {
 
   function handleOAuthSuccess(id: string) {
     setConnected((prev) => new Set([...prev, id]));
+  }
+
+  function handleApiKeyModalSuccess(id: string) {
+    setConnected((prev) => new Set([...prev, id]));
+    setToast({ message: `${INTEGRATIONS.find((i) => i.id === id)?.name ?? id} connected successfully!`, kind: 'success' });
   }
 
   function handleApiKeyConnect(id: string) {
@@ -975,6 +1017,27 @@ function IntegrationsPageInner() {
       return;
     }
 
+    // API-key integrations with a real server endpoint — call the generic DELETE
+    if (id in API_KEY_CONNECT_ENDPOINTS) {
+      const integrationName = INTEGRATIONS.find((i) => i.id === id)?.name ?? id;
+      try {
+        const res = await fetch(
+          `/api/integrations?integrationId=${encodeURIComponent(id)}`,
+          { method: 'DELETE' }
+        );
+        if (!res.ok) {
+          setToast({ message: `Failed to disconnect ${integrationName}. Please try again.`, kind: 'error' });
+          return;
+        }
+        setConnected((prev) => { const next = new Set(prev); next.delete(id); return next; });
+        setExpandedId(null);
+        setToast({ message: `${integrationName} disconnected.`, kind: 'success' });
+      } catch {
+        setToast({ message: `Failed to disconnect ${integrationName}. Please try again.`, kind: 'error' });
+      }
+      return;
+    }
+
     setConnected((prev) => {
       const next = new Set(prev);
       next.delete(id);
@@ -1000,6 +1063,10 @@ function IntegrationsPageInner() {
 
   const oauthIntegration = oauthModalId
     ? INTEGRATIONS.find((i) => i.id === oauthModalId) ?? null
+    : null;
+
+  const apiKeyIntegration = apiKeyModalId
+    ? INTEGRATIONS.find((i) => i.id === apiKeyModalId) ?? null
     : null;
 
   /* ---------- render ---------- */
@@ -1427,6 +1494,21 @@ function IntegrationsPageInner() {
           iconText={CATEGORIES[oauthIntegration.category]?.badgeText ?? 'text-fg-3'}
           onClose={() => setOauthModalId(null)}
           onSuccess={() => handleOAuthSuccess(oauthIntegration.id)}
+        />
+      )}
+
+      {/* API Key modal — for integrations with a real server-side connect endpoint */}
+      {apiKeyIntegration && apiKeyIntegration.id in API_KEY_CONNECT_ENDPOINTS && (
+        <ApiKeyModal
+          integrationId={apiKeyIntegration.id}
+          serviceName={apiKeyIntegration.name}
+          serviceIcon={apiKeyIntegration.icon}
+          iconBg={CATEGORIES[apiKeyIntegration.category]?.badgeBg ?? 'bg-bg-3'}
+          iconText={CATEGORIES[apiKeyIntegration.category]?.badgeText ?? 'text-fg-3'}
+          configFields={apiKeyIntegration.configFields ?? []}
+          connectEndpoint={API_KEY_CONNECT_ENDPOINTS[apiKeyIntegration.id]!}
+          onClose={() => setApiKeyModalId(null)}
+          onSuccess={() => handleApiKeyModalSuccess(apiKeyIntegration.id)}
         />
       )}
     </div>

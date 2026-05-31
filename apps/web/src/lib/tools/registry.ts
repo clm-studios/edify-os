@@ -74,6 +74,7 @@ import {
   executeDraftGrantContent,
   executeReviseGrantContent,
 } from "@/lib/tools/grant-writing-handlers";
+import { mailchimpTools, executeMailchimpTool, MAILCHIMP_TOOLS_ADDENDUM } from "@/lib/tools/mailchimp";
 import { getValidGoogleAccessToken, type GoogleIntegrationType } from "@/lib/google";
 import { ARCHETYPE_SLUGS, type ArchetypeSlug } from "@/lib/archetypes";
 
@@ -100,6 +101,7 @@ export {
   CONSULT_TEAMMATE_TOOLS_ADDENDUM,
   ORG_MEMORY_TOOLS_ADDENDUM,
   GRANT_WRITING_TOOLS_ADDENDUM,
+  MAILCHIMP_TOOLS_ADDENDUM,
 };
 export type { RenderToolGeneratedFile };
 
@@ -239,6 +241,7 @@ export function buildSystemAddendums(tools: Anthropic.Tool[]): string {
   if (families.has("consult_teammate")) parts.push(CONSULT_TEAMMATE_TOOLS_ADDENDUM);
   if (families.has("org_memory")) parts.push(ORG_MEMORY_TOOLS_ADDENDUM);
   if (families.has("grant_writing")) parts.push(GRANT_WRITING_TOOLS_ADDENDUM);
+  if (families.has("mailchimp")) parts.push(MAILCHIMP_TOOLS_ADDENDUM);
   return parts.join("");
 }
 
@@ -252,6 +255,7 @@ export const ARCHETYPE_TOOLS: Record<ArchetypeSlug, Anthropic.Tool[]> = {
   events_director: [...calendarTools, ...driveTools, ...unsplashTools, ...memoryTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
   development_director: [...calendarTools, ...searchGrantsTools, ...crmTools, ...gmailTools, ...driveTools, ...memoryTools, ...orgMemoryTools, ...grantWritingTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
   marketing_director: [
+    ...mailchimpTools,
     ...driveTools,
     ...unsplashTools,
     ...renderTools,
@@ -384,6 +388,10 @@ export async function executeTool({
 
   if (name.startsWith("crm_")) {
     return executeCrmTool({ name, input, orgId, memberId, serviceClient });
+  }
+
+  if (name.startsWith("mailchimp_")) {
+    return executeMailchimpTool({ name, input, orgId, serviceClient });
   }
 
   if (name.startsWith("gmail_")) {
