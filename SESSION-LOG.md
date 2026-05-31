@@ -1652,3 +1652,97 @@ https://github.com/clm-studios/edify-os/pull/22 — OPEN, ready-for-review. Do N
 ## Status: STARTED
 
 Reconnaissance complete. Starting implementation of all 3 layers.
+
+---
+
+## SESSION: feat/mailchimp-oauth agent — 2026-05-31
+
+**Identity:** Mailchimp OAuth Layer A agent (Sonnet, spawned by Lopmon)
+**Branch:** `feat/mailchimp-oauth`
+**Worktree:** `C:\Users\Araly\edify-os\UsersAralyedify-os-mailchimp-oauth`
+**Base:** `feat/mailchimp-marketing-director` @ `8c1ecee` (Layers B+C already present)
+**Date:** 2026-05-31
+**Task:** Build Layer A only — OAuth connect path for Mailchimp Marketing Director integration. PRD: `~/life/projects/edify-os/prd-mailchimp-marketing-director-2026-05-30.md` (revised 2026-05-31 OAuth pivot).
+
+---
+
+### Reconnaissance
+
+Read PRD §5 Layer A, §8, §9, §10. Read reference files:
+- `google/connect/route.ts` — CSRF state cookie, redirect pattern
+- `google/callback/route.ts` — code exchange, token storage, upsert pattern
+- `lib/crypto.ts` — `encrypt()`, `CRYPTO_LABEL_MAILCHIMP_API_KEY` already present from 8c1ecee
+- `dashboard/integrations/page.tsx` — existing card wiring, modal system
+- `ApiKeyModal.tsx` and `OAuthModal.tsx` — component shapes
+
+**Findings from 8c1ecee (interrupted api_key run):**
+- `connect/route.ts` existed as POST handler (api-key validation path) — replaced
+- `callback/route.ts` did NOT exist — created new
+- `page.tsx` had Mailchimp as `connectionType: 'api_key'` with `configFields` — reverted to `'oauth'`
+- `ApiKeyModal.tsx` existed — deleted (no longer needed; never shipped)
+
+---
+
+### Changes Made
+
+**1. `apps/web/src/app/api/integrations/mailchimp/connect/route.ts` — REPLACED**
+- Was: POST handler accepting api_key JSON body
+- Now: GET handler that redirects to `https://login.mailchimp.com/oauth2/authorize?...`
+- State cookie: `mailchimp_oauth_state` (httpOnly, 10-min, carries nonce.orgId.memberId)
+- Reads `MAILCHIMP_CLIENT_ID` + `MAILCHIMP_CLIENT_SECRET` from env (startup guard)
+- No exports beyond `GET` handler (Next.js route constraint)
+
+**2. `apps/web/src/app/api/integrations/mailchimp/callback/route.ts` — CREATED**
+- Validates CSRF state cookie, extracts orgId/memberId from state string
+- Code exchange: `POST https://login.mailchimp.com/oauth2/token` (form-urlencoded)
+- Metadata resolution: `GET https://login.mailchimp.com/oauth2/metadata` with `Authorization: OAuth <token>` → extracts `dc` (server_prefix) and `api_endpoint`
+- Encrypts access token via `encrypt()`, upserts `integrations` row: `type='mailchimp'`, `access_token_encrypted`, `config={server_prefix, api_endpoint}`, `status='active'`
+- Redirects to `dashboard/integrations?mailchimp=connected` (or `?mailchimp=denied&reason=...`)
+- **Mailchimp tokens do not expire; no refresh token stored**
+
+**3. `apps/web/src/lib/mailchimp-oauth.ts` — CREATED**
+- Shared constants for connect/callback routes (`MAILCHIMP_STATE_COOKIE`)
+- Next.js disallows non-HTTP-method exports from route files — extracted to lib module
+
+**4. `apps/web/src/app/dashboard/integrations/page.tsx` — EDITED**
+- Mailchimp card: `connectionType: 'oauth'` (removed `configFields`)
+- Added `MAILCHIMP_INTEGRATION_IDS` set
+- `hasRealOAuthFlow` updated to include Mailchimp
+- Removed `API_KEY_CONNECT_ENDPOINTS` constant (mailchimp was the only entry)
+- `handleConnectClick`: added Mailchimp branch → `window.location.href = '/api/integrations/mailchimp/connect'`
+- `handleDisconnect`: added Mailchimp branch → generic `DELETE /api/integrations?integrationId=mailchimp`
+- Added `?mailchimp=connected/denied` useEffect handler (mirrors Google/Canva pattern)
+- `loadMailchimpStatus` converted to `useCallback` so it can be called from the param handler
+- Removed `ApiKeyModal` import, `apiKeyModalId` state, `apiKeyIntegration` computed var, `handleApiKeyModalSuccess`
+- Kept `handleApiKeyConnect` (still used by expanded modal for other api_key integrations)
+- Removed `ApiKeyModal` render block
+
+**5. `apps/web/src/app/dashboard/integrations/components/ApiKeyModal.tsx` — DELETED**
+- Dropped per PRD; was only wired to Mailchimp (which is now OAuth)
+- No other integration referenced it
+
+---
+
+### Verification
+
+- `pnpm --filter web typecheck` — PASSED (no errors)
+- `pnpm --filter web build` — PASSED (clean build, all routes compiled)
+- OAuth round-trip NOT testable without `MAILCHIMP_CLIENT_ID`, `MAILCHIMP_CLIENT_SECRET`, and the registered Mailchimp OAuth app — Citlali is setting those up separately (expected)
+- Disconnect path uses existing `DELETE /api/integrations?integrationId=mailchimp` which is type-generic and works for any integration type (verified by reading the route)
+
+---
+
+### What's already done (from 8c1ecee, NOT touched)
+
+- `apps/web/src/lib/tools/mailchimp.ts` — 7 Mailchimp tools + executor (Layers B)
+- `apps/web/src/lib/tools/registry.ts` — marketing_director spread + mailchimp_ dispatch (Layer C)
+- `apps/web/src/lib/crypto.ts` — `CRYPTO_LABEL_MAILCHIMP_API_KEY` label (kept as-is; rename to _ACCESS_TOKEN skipped per PRD optional note)
+
+---
+
+### Open items (not blocking)
+
+- `MAILCHIMP_CLIENT_ID` / `MAILCHIMP_CLIENT_SECRET` env vars need to be set in Vercel (Citlali-in-loop prod secret write, per `feedback_prod_secret_writes_need_user_in_loop`)
+- Mailchimp OAuth app registration needed (see `mailchimp-oauth-registration-staged-for-citlali.md`)
+- Redirect URI that must be registered exactly: `https://edify-os.vercel.app/api/integrations/mailchimp/callback`
+
