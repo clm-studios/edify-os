@@ -8,7 +8,7 @@ const KEY_BYTES = 32;
 export const CRYPTO_LABEL_ANTHROPIC_KEY = "orgs.anthropic_api_key";
 export const CRYPTO_LABEL_GOOGLE_ACCESS_TOKEN = "integrations.access_token";
 export const CRYPTO_LABEL_GOOGLE_REFRESH_TOKEN = "integrations.refresh_token";
-export const CRYPTO_LABEL_MAILCHIMP_API_KEY = "integrations.mailchimp_api_key";
+export const CRYPTO_LABEL_MAILCHIMP_TOKEN = "integrations.mailchimp_token";
 
 let _cachedKey: Buffer | null = null;
 function getKey(): Buffer {

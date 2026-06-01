@@ -3,7 +3,7 @@ import { cookies } from 'next/headers';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { encrypt } from '@/lib/crypto';
 import { getAppOrigin } from '@/lib/google';
-import { MAILCHIMP_STATE_COOKIE } from '@/lib/mailchimp-oauth';
+import { MAILCHIMP_STATE_COOKIE, getMailchimpRedirectUri } from '@/lib/mailchimp-oauth';
 
 /**
  * GET /api/integrations/mailchimp/callback
@@ -46,10 +46,7 @@ export async function GET(req: NextRequest) {
   const storedState = cookieStore.get(MAILCHIMP_STATE_COOKIE)?.value;
 
   if (!storedState || storedState !== state) {
-    return NextResponse.json(
-      { error: 'OAuth state mismatch (possible CSRF attempt)' },
-      { status: 400 }
-    );
+    return clearAndRedirect(`${origin}/dashboard/integrations?mailchimp=denied&reason=state_mismatch`);
   }
 
   if (!code) {
@@ -85,7 +82,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const redirectUri = `${origin}/api/integrations/mailchimp/callback`;
+  const redirectUri = getMailchimpRedirectUri();
 
   // --- Exchange code for access token ---
   let accessToken: string;

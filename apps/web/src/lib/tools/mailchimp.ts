@@ -16,7 +16,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import crypto from "crypto";
-import { decryptIfEncrypted, CRYPTO_LABEL_MAILCHIMP_API_KEY } from "@/lib/crypto";
+import { decryptIfEncrypted, CRYPTO_LABEL_MAILCHIMP_TOKEN } from "@/lib/crypto";
 
 // ---------------------------------------------------------------------------
 // System-prompt addendum for archetypes that have Mailchimp tools active.
@@ -309,7 +309,7 @@ export async function executeMailchimpTool({
 
   const apiKey = decryptIfEncrypted(
     integrationRow.access_token_encrypted as string | null,
-    CRYPTO_LABEL_MAILCHIMP_API_KEY
+    CRYPTO_LABEL_MAILCHIMP_TOKEN
   );
 
   if (!apiKey) {
