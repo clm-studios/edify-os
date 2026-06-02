@@ -159,3 +159,29 @@ Ran `render()` with Citlali's full Open Doors Career Day prompt (no hero_image_u
 ### Upload Status
 - `.env.local` not in worktree — SKIPPED
 - Lopmon to run upload from main checkout after merge: `export ANTHROPIC_API_KEY=$(grep -E '^ANTHROPIC_API_KEY=' apps/web/.env.local | cut -d= -f2- | tr -d '"' | tr -d "'") && pnpm dlx tsx scripts/upload-plugin-skills.ts`
+
+---
+
+# Session Log — feat/mailchimp-oauth-followup (2026-06-01)
+
+**Agent:** Sonnet coding agent (spawned by Lopmon)
+**Branch:** `feat/mailchimp-oauth-followup`
+**Date:** 2026-06-01
+**PR:** DRAFT against main (PR #23 fast-follow)
+
+## Task
+
+Fixed 3 minor reviewer findings from PR #23 (Mailchimp one-click OAuth). Finding #4 (relocate `getAppOrigin` out of `@/lib/google`) is DEFERRED as out-of-scope — cross-cutting ~13 import sites across 6 integrations.
+
+## Changes
+
+| Finding | File(s) | Change |
+|---|---|---|
+| #1 — DRY redirect URI | `connect/route.ts`, `callback/route.ts` | Adopted `getMailchimpRedirectUri()` helper in both routes instead of inlining the string. Removed unused `origin` var + `getAppOrigin` import from connect route. |
+| #2 — Stale crypto label | `lib/crypto.ts`, `lib/tools/mailchimp.ts` | Renamed `CRYPTO_LABEL_MAILCHIMP_API_KEY` → `CRYPTO_LABEL_MAILCHIMP_TOKEN`; string value `"integrations.mailchimp_api_key"` → `"integrations.mailchimp_token"`. Log-only label; confirmed safe (not AES-GCM associated data). |
+| #3 — State-mismatch UX | `callback/route.ts` | State-mismatch branch now calls `clearAndRedirect(...)` (cookie hygiene + redirect to integrations page) instead of returning raw JSON 400. |
+
+## Status
+
+`pnpm --filter web typecheck` — PASS
+`pnpm --filter web build` — PASS (125 pages generated, no errors)

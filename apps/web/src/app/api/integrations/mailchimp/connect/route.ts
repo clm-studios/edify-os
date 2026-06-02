@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { randomBytes } from 'crypto';
 import { getAuthContext } from '@/lib/supabase/server';
-import { getAppOrigin } from '@/lib/google';
-import { MAILCHIMP_STATE_COOKIE } from '@/lib/mailchimp-oauth';
+import { MAILCHIMP_STATE_COOKIE, getMailchimpRedirectUri } from '@/lib/mailchimp-oauth';
 
 /**
  * GET /api/integrations/mailchimp/connect
@@ -29,8 +28,7 @@ export async function GET() {
   }
 
   // Pin redirect_uri — must EXACTLY match what is registered in the Mailchimp app
-  const origin = getAppOrigin();
-  const redirectUri = `${origin}/api/integrations/mailchimp/callback`;
+  const redirectUri = getMailchimpRedirectUri();
 
   // Generate CSRF state token and embed org/member identity so the callback
   // can look up the right user without relying on session cookies alone.
