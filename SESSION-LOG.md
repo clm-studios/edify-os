@@ -1746,3 +1746,38 @@ Read PRD §5 Layer A, §8, §9, §10. Read reference files:
 - Mailchimp OAuth app registration needed (see `mailchimp-oauth-registration-staged-for-citlali.md`)
 - Redirect URI that must be registered exactly: `https://edify-os.vercel.app/api/integrations/mailchimp/callback`
 
+
+---
+
+## 2026-06-01 — feat/archetype-voice-skills — Grant-narrative voice skill (v1 pattern-proof)
+
+**Agent:** Coding agent (Sonnet, spawned by Lopmon)
+**Branch:** `feat/archetype-voice-skills`
+**Worktree:** `C:\Users\Araly\edify-os-archetype-voice-skills`
+**Base:** `origin/main` @ `fe2f02b`
+**PRD:** `~/life/projects/edify-os/archetype-voice-skills-integration-prd.md`
+
+### Summary
+
+Added the VoiceSkill registry infrastructure and injected the grant-narrative skill as the first entry (development_director, intent-gated). This is the v1 pattern-proof; donor-voice + board-comms are deferred to a fast-follow batch PR.
+
+### Files changed
+
+- `apps/web/src/lib/skills/registry.ts` — Added `VoiceSkill` interface, `GRANT_NARRATIVE_ADDENDUM` constant (verbatim body from grant-narrative.md, frontmatter stripped), `VOICE_SKILLS` array (one entry: grant-narrative, development_director, 8 trigger RegExps), and `selectVoiceSkillAddendum()` function.
+- `apps/web/src/lib/chat/run-archetype-turn.ts` — Imported `selectVoiceSkillAddendum`; added `voiceSkillAddendum` computation (Block 2, uncached); appended to `conditionalAddendums`. Block 1 stable text unchanged.
+- `apps/web/src/lib/skills/__tests__/voice-skills.test.ts` — New unit test file: 15 tests covering trigger set (on/off intent), selectVoiceSkillAddendum return values, non-eligible archetype guard, and cache-integrity assertions.
+- `apps/web/vitest.config.ts` — New vitest config with `@/` path alias resolution.
+- `apps/web/package.json` — Added `"test": "vitest run"` script and `vitest` devDependency.
+
+### Acceptance criteria results
+
+1. `pnpm --filter web typecheck` — PASS (0 errors)
+2. `pnpm --filter web build` — PASS (125 pages, 0 errors)
+3. Unit tests (`pnpm --filter web test`) — PASS (15/15)
+4. No regression: non-matching archetypes/messages return "" (verified by tests)
+5. Cache integrity: voiceSkillAddendum only in Block 2 (conditionalAddendums), Block 1 stableSystemText content unchanged
+
+### Deferred
+
+- donor-voice skill (marketing_director) — fast-follow batch PR
+- board-comms skill (executive_assistant) — fast-follow batch PR

@@ -29,6 +29,7 @@ import {
   FRONTEND_DESIGN_ARCHETYPES,
   FRONTEND_DESIGN_ADDENDUM,
   shouldAttachFrontendDesign,
+  selectVoiceSkillAddendum,
 } from "@/lib/skills/registry";
 import type { ArchetypeSlug } from "@/lib/archetypes";
 import { insertActivityEvent } from "@/lib/hours-saved/insert-event";
@@ -212,6 +213,12 @@ export async function runArchetypeTurn({
     FRONTEND_DESIGN_ARCHETYPES.has(archetype) && shouldAttachFrontendDesign(userMessage);
   const frontendDesignAddendum = attachFrontendDesign ? FRONTEND_DESIGN_ADDENDUM : "";
 
+  // E. Voice Skills — inject the first matching voice-skill addendum when archetype is
+  // eligible AND the user message matches the skill's intent triggers.
+  // Like frontendDesignAddendum, this is intent-gated and MUST stay in Block 2 (uncached)
+  // so it never busts the prompt cache for non-matching turns.
+  const voiceSkillAddendum = selectVoiceSkillAddendum(archetype, userMessage);
+
   // Fix #2 — Split stable vs conditional system prompt.
   //
   // Block 1 (CACHED): archetype-stable content — systemPrompt + orgContext + toolAddendums.
@@ -219,14 +226,14 @@ export async function runArchetypeTurn({
   // whether the user is chatting or requesting a document, so the cache NEVER busts mid-
   // conversation. Expected impact: ~40-60% TTFT reduction on turns 2+ once cache is warm.
   //
-  // Block 2 (NOT cached): intent-conditional addendums — skillsAddendum + frontendDesignAddendum.
+  // Block 2 (NOT cached): intent-conditional addendums — skillsAddendum + frontendDesignAddendum + voiceSkillAddendum.
   // These change based on detected intent so they must stay outside the cached prefix.
   // Sending them as a separate uncached block preserves model behavior while keeping Block 1 stable.
   //
   // Anthropic prefix-match semantics: cached blocks must come BEFORE uncached blocks.
   // Block 1 (cache_control: ephemeral) is first; Block 2 (no cache_control) is second. ✓
   const stableSystemText = systemPrompt + orgContext + toolAddendums;
-  const conditionalAddendums = skillsAddendum + frontendDesignAddendum;
+  const conditionalAddendums = skillsAddendum + frontendDesignAddendum + voiceSkillAddendum;
   const stableBlock = { type: "text" as const, text: stableSystemText, cache_control: { type: "ephemeral" as const } };
   const systemBlocks = conditionalAddendums
     ? [stableBlock, { type: "text" as const, text: conditionalAddendums }]
