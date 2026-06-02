@@ -1781,3 +1781,45 @@ Added the VoiceSkill registry infrastructure and injected the grant-narrative sk
 
 - donor-voice skill (marketing_director) — fast-follow batch PR
 - board-comms skill (executive_assistant) — fast-follow batch PR
+
+---
+
+## 2026-06-01 — feat/voice-skills-batch — Donor-voice + board-comms batch + grant-narrative trigger tightening
+
+**Agent:** Coding agent (Sonnet, spawned by Lopmon)
+**Branch:** `feat/voice-skills-batch`
+**Worktree:** `C:\Users\Araly\edify-os-voice-skills-batch`
+**Base:** `origin/main` @ `ce3b5c3` (includes merged PR #25 grant-narrative v1)
+**PRD:** `~/life/projects/edify-os/archetype-voice-skills-integration-prd.md`
+
+### Summary
+
+Fast-follow batch adding donor-voice + board-comms to the VOICE_SKILLS registry, plus tightening the two over-broad grant-narrative triggers. No changes to run-archetype-turn.ts — the existing injection wiring was already correct.
+
+### Files changed
+
+- `apps/web/src/lib/skills/registry.ts` — Added `DONOR_VOICE_ADDENDUM` and `BOARD_COMMS_ADDENDUM` string constants (verbatim bodies from source .md files, frontmatter stripped). Added two new `VOICE_SKILLS` entries: `donor-voice` (archetypes: marketing_director, 7 triggers) and `board-comms` (archetypes: executive_assistant, 7 triggers). Tightened two grant-narrative triggers: `foundation` split into two regexps (proper-noun case-sensitive + funder-context-vocabulary), `outcomes` anchored to measurement/reporting vocabulary.
+- `apps/web/src/lib/skills/__tests__/voice-skills.test.ts` — Extended from 15 to 52 tests. Added donor-voice trigger set (5 tests) + selectVoiceSkillAddendum for donor-voice (6 tests); board-comms trigger set (6 tests) + selectVoiceSkillAddendum for board-comms (6 tests); grant-narrative tightening verification (8 new tests: 4 for foundation, 4 for outcomes); sanity checks (2 tests); cache-integrity group extended (3 new assertions).
+
+### Acceptance criteria results
+
+1. `pnpm --filter web typecheck` — PASS (0 errors)
+2. `pnpm --filter web build` — PASS (125 pages, clean)
+3. `pnpm --filter web test` (vitest) — PASS (52/52 tests, 0 failures)
+4. No regression: grant-narrative fires on all original trigger cases; no change to Block 1 / cached system prompt
+
+### Trigger tightening — final regexes and rationale
+
+**`foundation` (was `/\b(funder|funders|foundation|foundations)\b/i`)**
+- Split into two separate regexp entries:
+  - `/\b[A-Z][A-Za-z]+\s+Foundation\b/` (case-sensitive, no /i) — matches proper-noun funder names like "Hartwell Foundation", "MacArthur Foundation". The case-sensitive guard prevents "foundation of our plan" from matching.
+  - `/\bcommunity\s+foundation\b|\bfoundation\s+(grant|award|fund|RFP|LOI|support)\b/i` — matches "community foundation" and "foundation grant/award/fund/RFP/LOI/support".
+- `funder` / `funders` kept as a separate trigger entry (unchanged, still broad but intentionally so).
+
+**`outcomes` (was `/\blogic model\b|\boutcomes?\b/i`)**
+- Split into two entries: `/\blogic model\b/i` (unchanged) and `/\boutcomes?\s+(data|measure|report|track|evaluat|goal|metric)|(?:measure|report|track|evaluat|assess|logic model|program|grant)\s+\w*\s*\boutcomes?\b/i`.
+- Requires outcomes to appear with a measurement/reporting-context word on either side. Passes "report outcomes to the funder", "measure our program outcomes", "logic model and outcomes", "outcomes data". Blocks "outcome of the gala", "the final outcome".
+
+### Deferred
+
+No items deferred. All three voice skills are now shipped.
