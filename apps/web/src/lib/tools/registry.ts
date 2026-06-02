@@ -75,6 +75,7 @@ import {
   executeReviseGrantContent,
 } from "@/lib/tools/grant-writing-handlers";
 import { mailchimpTools, executeMailchimpTool, MAILCHIMP_TOOLS_ADDENDUM } from "@/lib/tools/mailchimp";
+import { eventbriteTools, executeEventbriteTool, EVENTBRITE_TOOLS_ADDENDUM } from "@/lib/tools/eventbrite";
 import { getValidGoogleAccessToken, type GoogleIntegrationType } from "@/lib/google";
 import { ARCHETYPE_SLUGS, type ArchetypeSlug } from "@/lib/archetypes";
 
@@ -102,6 +103,7 @@ export {
   ORG_MEMORY_TOOLS_ADDENDUM,
   GRANT_WRITING_TOOLS_ADDENDUM,
   MAILCHIMP_TOOLS_ADDENDUM,
+  EVENTBRITE_TOOLS_ADDENDUM,
 };
 export type { RenderToolGeneratedFile };
 
@@ -242,6 +244,7 @@ export function buildSystemAddendums(tools: Anthropic.Tool[]): string {
   if (families.has("org_memory")) parts.push(ORG_MEMORY_TOOLS_ADDENDUM);
   if (families.has("grant_writing")) parts.push(GRANT_WRITING_TOOLS_ADDENDUM);
   if (families.has("mailchimp")) parts.push(MAILCHIMP_TOOLS_ADDENDUM);
+  if (families.has("eventbrite")) parts.push(EVENTBRITE_TOOLS_ADDENDUM);
   return parts.join("");
 }
 
@@ -252,7 +255,7 @@ export function buildSystemAddendums(tools: Anthropic.Tool[]): string {
 
 export const ARCHETYPE_TOOLS: Record<ArchetypeSlug, Anthropic.Tool[]> = {
   executive_assistant: [...calendarTools, ...gmailTools, ...driveTools, ...memoryTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
-  events_director: [...calendarTools, ...driveTools, ...unsplashTools, ...memoryTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
+  events_director: [...calendarTools, ...driveTools, ...unsplashTools, ...eventbriteTools, ...memoryTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
   development_director: [...calendarTools, ...searchGrantsTools, ...crmTools, ...gmailTools, ...driveTools, ...memoryTools, ...orgMemoryTools, ...grantWritingTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
   marketing_director: [
     ...mailchimpTools,
@@ -392,6 +395,10 @@ export async function executeTool({
 
   if (name.startsWith("mailchimp_")) {
     return executeMailchimpTool({ name, input, orgId, serviceClient });
+  }
+
+  if (name.startsWith("eventbrite_")) {
+    return executeEventbriteTool({ name, input, orgId, serviceClient });
   }
 
   if (name.startsWith("gmail_")) {
