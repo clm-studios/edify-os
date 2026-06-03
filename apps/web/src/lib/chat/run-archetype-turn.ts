@@ -476,6 +476,19 @@ export async function runArchetypeTurn({
       round);
     }
 
+    // Docx-stall triage: cheap content scan to flag a code-execution round —
+    // one that carries code-exec tool-result blocks (which is where docx file
+    // outputs arrive). Computed BEFORE the round log so we can tag that log with
+    // a greppable `codeExecRound` flag, letting a stalled LOI turn be attributed
+    // to the code-exec round (candidate (a)) vs a plain generation round. No PII.
+    const CODE_EXEC_RESULT_TYPES = new Set([
+      "bash_code_execution_tool_result",
+      "code_execution_tool_result",
+    ]);
+    const codeExecRound = Array.isArray(response.content)
+      ? response.content.some((b: { type: string }) => CODE_EXEC_RESULT_TYPES.has(b.type))
+      : false;
+
     // Accumulate token usage from this API response
     // Fix #1 — also log per-round structured metrics for Vercel log filtering.
     if (response.usage) {
@@ -491,6 +504,8 @@ export async function runArchetypeTurn({
       tokenUsage.cacheCreationTokens += roundCacheCreation;
       // Fix #1 — per-round structured log. Filter in Vercel with: [perf]
       // No PII: no message content, no user identifiers — only metrics.
+      // codeExecRound (docx-stall triage) flags the round that ran the docx skill
+      // in the Anthropic container — its durationMs is candidate stall point (a).
       console.log("[perf] round", {
         orgId,
         archetype,
@@ -501,11 +516,21 @@ export async function runArchetypeTurn({
         cacheReadTokens: roundCacheRead,
         cacheCreationTokens: roundCacheCreation,
         stopReason: response.stop_reason,
+        codeExecRound,
       });
     }
 
     // Collect any skill-generated file outputs (two block-type variants from the beta API)
+    //
+    // Docx-stall triage instrumentation (diagnosis only — no behavior change):
+    // wrap the file-collection block with wall-time so the time spent collecting
+    // files in a round is visible DISTINCTLY from the model-generation time already
+    // captured by [perf] round.durationMs. `filesCollected` counts the file_id
+    // outputs we hand to collectFileOutput. Mirrors the existing
+    // `console.log("[perf] <name>", {...})` convention: fire-and-forget, no PII.
     if (attachSkills) {
+      const fileCollectStartMs = Date.now();
+      let filesCollected = 0;
       const FILE_RESULT_TYPES: Record<string, string> = {
         bash_code_execution_tool_result: "bash_code_execution_result",
         code_execution_tool_result: "code_execution_result",
@@ -522,6 +547,7 @@ export async function runArchetypeTurn({
         if (result?.type === expectedResultType && Array.isArray(result.content)) {
           for (const output of result.content) {
             if (output.file_id) {
+              filesCollected++;
               await collectFileOutput(
                 output.file_id,
                 anthropic,
@@ -533,6 +559,19 @@ export async function runArchetypeTurn({
             }
           }
         }
+      }
+      // Only emit when this round actually produced file outputs — keeps the
+      // log channel focused on the docx-build path and avoids per-round noise.
+      if (filesCollected > 0) {
+        // [perf] file_collect — wall-time for the whole file-collection step in
+        // this round. Filter in Vercel with: [perf] file_collect
+        console.log("[perf] file_collect", {
+          orgId,
+          archetype,
+          round,
+          filesCollected,
+          collectMs: Date.now() - fileCollectStartMs,
+        });
       }
     }
 
@@ -752,10 +791,29 @@ async function collectFileOutput(
   let mimeType = "application/octet-stream";
   let ext = "";
 
+  // Docx-stall triage instrumentation (diagnosis only — no behavior change).
+  // Stage timing around the only synchronous network call in this helper
+  // (retrieveMetadata). The actual file download + storage proxy happens
+  // lazily in /api/files/[fileId] when the user clicks, NOT here — so the
+  // in-turn stall, if it lives in this helper, must be the metadata fetch.
+  // Mirrors the existing `console.log("[perf] <name>", {...})` convention:
+  // fire-and-forget, no PII (only durations, ids, mime, ext, flags).
+  const collectStartMs = Date.now();
+  let metadataMs: number | null = null;
+  // "stage" pins which step a stall lands on if this log is the last one emitted
+  // before a turn hangs. It advances as we progress through the helper.
+  let stage = "metadata_retrieve";
+  let downloadable: boolean | undefined;
+  let metadataOk = false;
+
   try {
+    const metaStartMs = Date.now();
     const meta = await anthropic.beta.files.retrieveMetadata(fileId, {
       headers: { "anthropic-beta": "files-api-2025-04-14" },
     } as Parameters<typeof anthropic.beta.files.retrieveMetadata>[1]);
+    metadataMs = Date.now() - metaStartMs;
+    metadataOk = true;
+    stage = "post_metadata";
 
     // If Anthropic flags this file as not downloadable (e.g. a code-execution
     // container intermediate), don't surface it to chat — clicking it would
@@ -763,7 +821,19 @@ async function collectFileOutput(
     // just suppress the user-facing artifact pill.
     // Strict === false: only skip when the API explicitly says false. If
     // downloadable is true or undefined, keep the existing behavior.
-    if ((meta as { downloadable?: boolean }).downloadable === false) {
+    downloadable = (meta as { downloadable?: boolean }).downloadable;
+    if (downloadable === false) {
+      // [perf] docx — early-return path (suppressed artifact). Filter: [perf] docx
+      console.log("[perf] docx", {
+        orgId: trackingCtx?.orgId,
+        archetype: trackingCtx?.archetype,
+        stage: "skipped_not_downloadable",
+        fileIdLen: fileId.length,
+        metadataMs,
+        metadataOk,
+        downloadable,
+        totalMs: Date.now() - collectStartMs,
+      });
       return;
     }
 
@@ -774,12 +844,30 @@ async function collectFileOutput(
     }
   } catch {
     // Non-fatal — use fileId as fallback name
+    if (metadataMs === null) metadataMs = Date.now() - collectStartMs;
+    stage = "metadata_error";
   }
 
   generatedFiles.push({
     name: filename,
     mimeType,
     downloadUrl: `/api/files/${encodeURIComponent(fileId)}`,
+  });
+  stage = "collected";
+
+  // [perf] docx — per-collected-file stage timing. Filter in Vercel with: [perf] docx
+  // No PII: only the fileId length (not the id text), mime, ext, durations, flags.
+  console.log("[perf] docx", {
+    orgId: trackingCtx?.orgId,
+    archetype: trackingCtx?.archetype,
+    stage,
+    fileIdLen: fileId.length,
+    ext: ext || null,
+    mimeType,
+    metadataMs,
+    metadataOk,
+    downloadable,
+    totalMs: Date.now() - collectStartMs,
   });
 
   // Fire-and-forget: track skill document generation for hours-saved counter.

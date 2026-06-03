@@ -1891,3 +1891,78 @@ Live smoke test waits on: register Eventbrite OAuth app → `EVENTBRITE_CLIENT_I
 ### Draft PR
 
 Opened as DRAFT against `main`. Awaiting Lopmon + Minervamon review.
+
+---
+
+## 2026-06-03 — Docx / grant-proposal-writer stall TRIAGE (instrumentation only, no behavior change)
+
+**Identity:** Coding agent (Sonnet, spawned by Lopmon)
+**Branch:** `feat/docx-stall-triage`
+**Worktree:** `C:\Users\Araly\edify-os-docx-stall-triage`
+**Base:** `origin/main` @ `97e83da`
+**Task:** PRD `prd-docx-stall-triage-2026-06-03.md` — localize the ~3–9 min stall on the Development Director's docx / grant-proposal-writer (LOI) build path by adding fine-grained `[perf]` timing around the document-build stages. Phase 1 = diagnosis only, NO behavioral change (no timeout, no fallback, no retry change). Bug ticket: `bug-docx-grant-proposal-writer-stall-2026-06-02.md`.
+
+### Files changed
+
+- `apps/web/src/lib/chat/run-archetype-turn.ts` — +90 lines, instrumentation only:
+  - **`collectFileOutput` (helper):** added a `[perf] docx` structured log per collected file, capturing `metadataMs` (the `anthropic.beta.files.retrieveMetadata` call duration), `totalMs` (whole-helper wall-time), a `stage` label (`collected` | `skipped_not_downloadable` | `metadata_error`), `metadataOk`, `downloadable`, `ext`, `mimeType`, and `fileIdLen` (length only, never the id text). One log per collected file. No PII.
+  - **Round-loop file-collection block (~line 507):** wrapped with wall-time and emit a `[perf] file_collect` log `{orgId, archetype, round, filesCollected, collectMs}` — only when the round actually produced file outputs — so the time spent collecting files is visible DISTINCTLY from model-generation time.
+  - **`[perf] round` log (~line 494):** extended (NOT duplicated) with a greppable `codeExecRound` boolean, computed by a cheap scan of `response.content` for `code_execution_tool_result` / `bash_code_execution_tool_result` block types BEFORE the round log fires. Lets a stalled LOI turn be attributed to the code-exec round (candidate (a)).
+- `SESSION-LOG.md` — this entry (strict append).
+
+The per-turn `[perf] turn` / `[perf] round` TTFT+cache instrumentation already shipped in PR #13 was NOT touched (only the `codeExecRound` field added to `round`).
+
+### Static analysis of the docx-build path (read code first)
+
+The synchronous in-turn doc-build flow on `origin/main` @ `97e83da`:
+1. **Code-execution round** — the model runs the docx skill inside the Anthropic container; the generated file comes back as a `code_execution_tool_result` (or `bash_…`) content block carrying a `file_id`. This whole round's wall-time is already captured by `[perf] round.durationMs` and now flagged `codeExecRound: true`.
+2. **File-collection block** (round loop, ~line 507) — iterates `response.content`, and for each `file_id` calls `collectFileOutput(...)`. Now timed end-to-end by `[perf] file_collect.collectMs`.
+3. **`collectFileOutput`** (~line 744) — does exactly TWO things synchronously: (a) `anthropic.beta.files.retrieveMetadata(fileId)` (one network round-trip to Anthropic), then (b) push a `GeneratedFile` with `downloadUrl = /api/files/<fileId>` (a pure string build — no I/O). Now timed by `[perf] docx.metadataMs` / `.totalMs`.
+
+**IMPORTANT DISCREPANCY vs. the PRD/bug description — read this.** The PRD §3 and bug ticket describe `collectFileOutput` as "downloads the file content, then uploads it to Supabase Storage." **That is NOT what the current code does.** On `origin/main` @ `97e83da`, `collectFileOutput` does NOT download the file and does NOT upload to Supabase Storage. The actual download is **deferred and lazy**: it happens in the proxy route `apps/web/src/app/api/files/[fileId]/route.ts` only when the **user clicks the file pill** (that route does `retrieveMetadata` + `beta.files.download` and streams the bytes back — no storage upload anywhere). So PRD candidate stall points **(c) "file content download"** and **(d) "Supabase Storage upload" do NOT occur inside the in-turn path at all** — they cannot be the cause of a turn that hangs before the document is even surfaced. They are out of scope for the in-turn stall by construction. I instrumented the stages that actually exist in the synchronous path; the download/upload candidates are documented here as non-applicable rather than instrumented (instrumenting the proxy route was out of PRD scope and is a separate user-click event, not part of the stalled turn).
+
+### Candidate stall points + reasoning (revised against the actual code)
+
+- **(a) The code-execution round itself — MOST LIKELY culprit.** Running the docx skill inside the Anthropic code-execution container (sandbox spin-up + python-docx build + file write inside the container) is the only stage that plausibly takes minutes. The ~9 min (cold) → ~3 min (warm re-send) variance is a classic **cold-vs-warm container** signature, not a fixed client-side deadline — and it matches the bug's "hangs at build the LOI" observation (the model is waiting on the container, not on our code). This shows up as a large `[perf] round.durationMs` on the round flagged `codeExecRound: true`. The inline-text path being fast corroborates this: inline never invokes code execution, so it never pays the container cost.
+- **(b) `collectFileOutput` → `retrieveMetadata` — possible but lower probability.** A single metadata round-trip to Anthropic *could* be slow if the file object isn't ready yet, but a healthy metadata call is sub-second. If this is ever the culprit it will show as a large `[perf] docx.metadataMs`. Lower priority because there's no retry/backoff in this helper that would produce the 9→3 min variance.
+- **(c) file download / (d) Supabase upload — NOT in the in-turn path** (see discrepancy above). Excluded as causes of the in-turn stall.
+
+My leading hypothesis: **(a)**. The wall-time is being spent inside the Anthropic container building the .docx, surfaced as `[perf] round.durationMs` on the `codeExecRound: true` round. The new `[perf] file_collect` and `[perf] docx` logs exist primarily to *rule out* our post-generation collection code (expected: tens of ms), which sharpens attribution to the container round by elimination.
+
+### How to read the new logs to localize the stall (next live repro — Minervamon)
+
+On a live LOI repro (Development Director, "Write a one-page letter of inquiry to The Pinkerton Foundation"), grep Vercel logs for `[perf]` and read in this order:
+
+1. **`[perf] round`** — find the round with `codeExecRound: true`. Read its `durationMs`.
+   - If `durationMs` is in the **minutes** range → **the stall is the code-execution container (candidate (a))**. The fix is NOT in our app code; it's the container build time. Done — attribute to (a).
+2. **`[perf] file_collect`** — read `collectMs` for that round.
+   - If `collectMs` is in the **minutes** range while the `round.durationMs` for the API call was small → the stall is in our file-collection step (candidate (b) territory). Drill into `[perf] docx`.
+3. **`[perf] docx`** (one per collected file) — read `metadataMs` vs `totalMs`.
+   - Large `metadataMs` → `retrieveMetadata` is the slow stage (candidate (b)).
+   - `totalMs` ≈ `metadataMs` and both small → the helper is fast; the time is upstream (the container round, (a)).
+   - `stage: "metadata_error"` → metadata call threw (non-fatal); check `metadataOk: false`.
+
+Expected healthy magnitudes: `[perf] docx.totalMs` and `[perf] file_collect.collectMs` should be **tens of ms**. If they are, the minutes are in `[perf] round.durationMs` on the `codeExecRound: true` round → (a) confirmed.
+
+### Proposed remediation shape (PROPOSAL for review — NOT implemented in this PR)
+
+Pending the live-log attribution above, my recommendation:
+
+- **If the live logs confirm (a) the code-exec container round (most likely):** recommend **"both"** — (1) keep pursuing a faster docx build where feasible, but realistically container cold-start is largely outside our control, so (2) the high-value ship is a **bounded timeout on the doc-build turn with graceful fallback to the inline-text path**. Concretely: race the code-exec round against a deadline (e.g. ~45–60s, tunable); on deadline, abandon the docx attempt and re-prompt the same generation as inline text (the path the bug ticket already proved is fast and correct), surfacing the letter inline plus a soft note that the Word file is still building / can be retried. This directly fixes the benchmark chat-speed regression (Z's #2 priority) by never letting a user eat a 3–9 min hang, while preserving docx when the container is warm/fast. This is a **behavioral change** and therefore explicitly OUT of scope for this Phase-1 PR — it needs Minervamon/Lopmon sign-off before a Phase-2 agent implements it.
+- **If the live logs instead point to (b) `retrieveMetadata`:** narrower fix — add a timeout + small bounded retry around the metadata call only (it's already wrapped in a try/catch and is non-fatal). Cheaper, lower-risk, no inline fallback needed.
+
+I recommend **timeout→fallback-to-inline (option b in the bug ticket's framing), gated on confirming (a)** as the v1 ship, because it converts the worst-case latency from "minutes of dead air" to "seconds, then a correct inline answer" with no dependency on Anthropic container internals.
+
+### Verification
+
+- `pnpm --filter web typecheck` (tsc --noEmit): **PASS, 0 errors.**
+- `pnpm --filter web test` (vitest run): **96 passed, 0 failed** (no regressions; no new test added — the changes are pure fire-and-forget logging, no extracted pure helper to unit-test per PRD §7).
+- No behavioral diff: the document flow produces the same outputs; only `console.log` lines were added (and the `codeExecRound` field on the existing round log). `tsconfig.tsbuildinfo` (a tracked build artifact regenerated by typecheck) was reverted so the only source change is `run-archetype-turn.ts`.
+
+### Notes / judgment calls for Lopmon
+
+- The PRD's described `collectFileOutput` (download + Supabase upload) does not match `origin/main` @ `97e83da`. I instrumented the path as it actually exists and documented the discrepancy above rather than guessing a remediation around code that isn't there. If a download/upload-in-turn variant exists on a different branch, flag it and I (or a follow-up agent) can extend `[perf] docx` to cover those stages.
+
+### Draft PR
+
+Opened as DRAFT against `main`. Awaiting Lopmon + Minervamon review.
