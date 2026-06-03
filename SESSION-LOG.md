@@ -1858,3 +1858,36 @@ Wired a real one-click OAuth flow for Eventbrite so the **Events Director** (`ev
 
 ### Pending (Citlali-in-loop — §6)
 Live smoke test waits on: register Eventbrite OAuth app → `EVENTBRITE_CLIENT_ID` + `EVENTBRITE_CLIENT_SECRET` as Vercel Production env vars; redirect URI `https://edify-os.vercel.app/api/integrations/eventbrite/callback`. Code can merge to Draft PR before secrets exist.
+
+---
+
+## 2026-06-03 — Voice Skills Batch: Programs / Events / Volunteer
+
+**Identity:** Coding agent (Sonnet, spawned by Lopmon)
+**Branch:** `feat/voice-skills-programs-events-volunteer`
+**Worktree:** `C:\Users\Araly\edify-os-voice-skills-batch2`
+**Base:** `origin/main` @ `2237030`
+**Task:** PRD `prd-voice-skills-batch-2026-06-03.md` — wire 3 remaining archetype voice skills into the chat system-prompt addendum pipeline.
+
+### Files changed
+
+- `apps/web/src/lib/skills/registry.ts` — +290 lines: added `PROGRAMS_DIRECTOR_ADDENDUM`, `EVENTS_DIRECTOR_ADDENDUM`, `VOLUNTEER_COORDINATOR_ADDENDUM` const bodies (verbatim from source .md files, frontmatter stripped, backticks escaped); added 3 new entries to the `VOICE_SKILLS` array (`programs-director` → `programs_director`, `events-director` → `events_director`, `volunteer-coordinator` → `hr_volunteer_coordinator`).
+- `apps/web/src/lib/skills/__tests__/voice-skills.test.ts` — +319 lines: added describe blocks 8/9/10 for programs-director, events-director, volunteer-coordinator. Each block covers: trigger-set fires on on-intent messages, does NOT fire on off-intent, selectVoiceSkillAddendum returns non-empty with correct H1 and "Org voice takes precedence", returns "" for wrong archetypes, and explicit over-firing guards for §8 collision messages.
+- `SESSION-LOG.md` — this entry (strict append).
+
+### Trigger collision constraints honored (PRD §8)
+
+- `"write a thank-you letter to our major donor"` → `""` for `events_director` and `hr_volunteer_coordinator`: events/volunteer thank-you triggers require event/volunteer context (never bare thank-you).
+- `"draft the ED report for the board"` → `""` for `programs_director`, `events_director`, `hr_volunteer_coordinator`: programs "report" triggers scoped to `(program|impact|progress|funder|outcomes) report`, never bare `/report/`.
+- `"draft our grant proposal for the Hartwell Foundation"` → `""` for all 3 new archetypes: no grant/proposal/Foundation triggers added.
+- `"what's on my calendar today"` → `""` for all 6 archetypes: no generic triggers.
+- `"draft our need statement for the Hartwell Foundation"` → `""` for `events_director`: no need-statement or Foundation triggers in events skill.
+
+### Test results
+
+- `pnpm --filter web test` (vitest run): **96 passed, 0 failed** (all 96 tests green, including all pre-existing tests)
+- `pnpm --filter web typecheck` (tsc --noEmit): **PASS, 0 errors**
+
+### Draft PR
+
+Opened as DRAFT against `main`. Awaiting Lopmon + Minervamon review.

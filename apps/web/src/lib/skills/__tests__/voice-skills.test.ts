@@ -413,3 +413,322 @@ describe("cache integrity: voice addendum is intent-gated and not in stable text
     }
   });
 });
+
+// -----------------------------------------------------------------------
+// 8. programs-director trigger set and selectVoiceSkillAddendum
+// -----------------------------------------------------------------------
+
+describe("programs-director trigger set", () => {
+  const programsSkill = VOICE_SKILLS.find((s) => s.id === "programs-director");
+
+  it("fires on 'draft our program impact report for this quarter'", () => {
+    expect(programsSkill).toBeDefined();
+    const matched = programsSkill!.triggers.some((re) =>
+      re.test("draft our program impact report for this quarter")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'write a funder progress report for the Kellogg grant'", () => {
+    expect(programsSkill).toBeDefined();
+    const matched = programsSkill!.triggers.some((re) =>
+      re.test("write a funder progress report for the Kellogg grant")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'help me write a participant story for the annual report'", () => {
+    expect(programsSkill).toBeDefined();
+    const matched = programsSkill!.triggers.some((re) =>
+      re.test("help me write a participant story for the annual report")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("does NOT fire on 'draft our grant proposal for the Hartwell Foundation'", () => {
+    expect(programsSkill).toBeDefined();
+    const matched = programsSkill!.triggers.some((re) =>
+      re.test("draft our grant proposal for the Hartwell Foundation")
+    );
+    expect(matched).toBe(false);
+  });
+
+  it("does NOT fire on 'draft the ED report for the board' (bare board report)", () => {
+    expect(programsSkill).toBeDefined();
+    const matched = programsSkill!.triggers.some((re) =>
+      re.test("draft the ED report for the board")
+    );
+    expect(matched).toBe(false);
+  });
+
+  it("does NOT fire on 'what's on my calendar today'", () => {
+    expect(programsSkill).toBeDefined();
+    const matched = programsSkill!.triggers.some((re) =>
+      re.test("what's on my calendar today")
+    );
+    expect(matched).toBe(false);
+  });
+});
+
+describe("selectVoiceSkillAddendum — programs-director", () => {
+  const ON_INTENT_MSG = "draft our program progress report for this quarter";
+  const OFF_INTENT_MSG = "what's on my calendar";
+
+  it("returns a non-empty string for programs_director + programs-intent message", () => {
+    const result = selectVoiceSkillAddendum("programs_director", ON_INTENT_MSG);
+    expect(result).not.toBe("");
+  });
+
+  it("result contains the distinctive phrase 'Programs Director'", () => {
+    const result = selectVoiceSkillAddendum("programs_director", ON_INTENT_MSG);
+    expect(result).toContain("Programs Director");
+  });
+
+  it("result contains 'Org voice takes precedence'", () => {
+    const result = selectVoiceSkillAddendum("programs_director", ON_INTENT_MSG);
+    expect(result).toContain("Org voice takes precedence");
+  });
+
+  it("returns '' for programs_director + off-intent message", () => {
+    const result = selectVoiceSkillAddendum("programs_director", OFF_INTENT_MSG);
+    expect(result).toBe("");
+  });
+
+  it("returns '' for development_director + programs-intent message (wrong archetype)", () => {
+    const result = selectVoiceSkillAddendum("development_director", ON_INTENT_MSG);
+    expect(result).toBe("");
+  });
+
+  it("returns '' for marketing_director + programs-intent message (wrong archetype)", () => {
+    const result = selectVoiceSkillAddendum("marketing_director", ON_INTENT_MSG);
+    expect(result).toBe("");
+  });
+
+  // Over-firing guards per PRD §8
+  it("returns '' for programs_director on 'write a thank-you letter to our major donor'", () => {
+    const result = selectVoiceSkillAddendum("programs_director", "write a thank-you letter to our major donor");
+    expect(result).toBe("");
+  });
+
+  it("returns '' for programs_director on 'draft the ED report for the board'", () => {
+    const result = selectVoiceSkillAddendum("programs_director", "draft the ED report for the board");
+    expect(result).toBe("");
+  });
+});
+
+// -----------------------------------------------------------------------
+// 9. events-director trigger set and selectVoiceSkillAddendum
+// -----------------------------------------------------------------------
+
+describe("events-director trigger set", () => {
+  const eventsSkill = VOICE_SKILLS.find((s) => s.id === "events-director");
+
+  it("fires on 'draft an event invitation for our annual gala'", () => {
+    expect(eventsSkill).toBeDefined();
+    const matched = eventsSkill!.triggers.some((re) =>
+      re.test("draft an event invitation for our annual gala")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'write a sponsorship pitch for our benefit dinner'", () => {
+    expect(eventsSkill).toBeDefined();
+    const matched = eventsSkill!.triggers.some((re) =>
+      re.test("write a sponsorship pitch for our benefit dinner")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'send a save-the-date for the fall fundraiser'", () => {
+    expect(eventsSkill).toBeDefined();
+    const matched = eventsSkill!.triggers.some((re) =>
+      re.test("send a save-the-date for the fall fundraiser")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("does NOT fire on 'write a thank-you letter to our major donor' (no event context)", () => {
+    expect(eventsSkill).toBeDefined();
+    const matched = eventsSkill!.triggers.some((re) =>
+      re.test("write a thank-you letter to our major donor")
+    );
+    expect(matched).toBe(false);
+  });
+
+  it("does NOT fire on 'draft the ED report for the board'", () => {
+    expect(eventsSkill).toBeDefined();
+    const matched = eventsSkill!.triggers.some((re) =>
+      re.test("draft the ED report for the board")
+    );
+    expect(matched).toBe(false);
+  });
+
+  it("does NOT fire on 'draft our need statement for the Hartwell Foundation'", () => {
+    expect(eventsSkill).toBeDefined();
+    const matched = eventsSkill!.triggers.some((re) =>
+      re.test("draft our need statement for the Hartwell Foundation")
+    );
+    expect(matched).toBe(false);
+  });
+
+  it("does NOT fire on 'what's on my calendar today'", () => {
+    expect(eventsSkill).toBeDefined();
+    const matched = eventsSkill!.triggers.some((re) =>
+      re.test("what's on my calendar today")
+    );
+    expect(matched).toBe(false);
+  });
+});
+
+describe("selectVoiceSkillAddendum — events-director", () => {
+  const ON_INTENT_MSG = "draft an event invitation for our annual gala";
+  const OFF_INTENT_MSG = "what's on my calendar";
+
+  it("returns a non-empty string for events_director + events-intent message", () => {
+    const result = selectVoiceSkillAddendum("events_director", ON_INTENT_MSG);
+    expect(result).not.toBe("");
+  });
+
+  it("result contains the distinctive phrase 'Events Director'", () => {
+    const result = selectVoiceSkillAddendum("events_director", ON_INTENT_MSG);
+    expect(result).toContain("Events Director");
+  });
+
+  it("result contains 'Org voice takes precedence'", () => {
+    const result = selectVoiceSkillAddendum("events_director", ON_INTENT_MSG);
+    expect(result).toContain("Org voice takes precedence");
+  });
+
+  it("returns '' for events_director + off-intent message", () => {
+    const result = selectVoiceSkillAddendum("events_director", OFF_INTENT_MSG);
+    expect(result).toBe("");
+  });
+
+  it("returns '' for development_director + events-intent message (wrong archetype)", () => {
+    const result = selectVoiceSkillAddendum("development_director", ON_INTENT_MSG);
+    expect(result).toBe("");
+  });
+
+  it("returns '' for marketing_director + events-intent message (wrong archetype)", () => {
+    const result = selectVoiceSkillAddendum("marketing_director", ON_INTENT_MSG);
+    expect(result).toBe("");
+  });
+
+  // Over-firing guards per PRD §8
+  it("returns '' for events_director on 'write a thank-you letter to our major donor'", () => {
+    const result = selectVoiceSkillAddendum("events_director", "write a thank-you letter to our major donor");
+    expect(result).toBe("");
+  });
+
+  it("returns '' for events_director on 'draft the ED report for the board'", () => {
+    const result = selectVoiceSkillAddendum("events_director", "draft the ED report for the board");
+    expect(result).toBe("");
+  });
+
+  it("returns '' for events_director on 'draft our need statement for the Hartwell Foundation'", () => {
+    const result = selectVoiceSkillAddendum("events_director", "draft our need statement for the Hartwell Foundation");
+    expect(result).toBe("");
+  });
+});
+
+// -----------------------------------------------------------------------
+// 10. volunteer-coordinator trigger set and selectVoiceSkillAddendum
+// -----------------------------------------------------------------------
+
+describe("volunteer-coordinator trigger set", () => {
+  const volunteerSkill = VOICE_SKILLS.find((s) => s.id === "volunteer-coordinator");
+
+  it("fires on 'write a volunteer recruitment post for our summer program'", () => {
+    expect(volunteerSkill).toBeDefined();
+    const matched = volunteerSkill!.triggers.some((re) =>
+      re.test("write a volunteer recruitment post for our summer program")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'draft a thank-you note for our volunteers who worked the shift'", () => {
+    expect(volunteerSkill).toBeDefined();
+    const matched = volunteerSkill!.triggers.some((re) =>
+      re.test("draft a thank-you note for our volunteers who worked the shift")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'write volunteer onboarding welcome email'", () => {
+    expect(volunteerSkill).toBeDefined();
+    const matched = volunteerSkill!.triggers.some((re) =>
+      re.test("write volunteer onboarding welcome email")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("does NOT fire on 'write a thank-you letter to our major donor' (no volunteer context)", () => {
+    expect(volunteerSkill).toBeDefined();
+    const matched = volunteerSkill!.triggers.some((re) =>
+      re.test("write a thank-you letter to our major donor")
+    );
+    expect(matched).toBe(false);
+  });
+
+  it("does NOT fire on 'draft the ED report for the board'", () => {
+    expect(volunteerSkill).toBeDefined();
+    const matched = volunteerSkill!.triggers.some((re) =>
+      re.test("draft the ED report for the board")
+    );
+    expect(matched).toBe(false);
+  });
+
+  it("does NOT fire on 'what's on my calendar today'", () => {
+    expect(volunteerSkill).toBeDefined();
+    const matched = volunteerSkill!.triggers.some((re) =>
+      re.test("what's on my calendar today")
+    );
+    expect(matched).toBe(false);
+  });
+});
+
+describe("selectVoiceSkillAddendum — volunteer-coordinator", () => {
+  const ON_INTENT_MSG = "write a volunteer recruitment post for our event crew";
+  const OFF_INTENT_MSG = "what's on my calendar";
+
+  it("returns a non-empty string for hr_volunteer_coordinator + volunteer-intent message", () => {
+    const result = selectVoiceSkillAddendum("hr_volunteer_coordinator", ON_INTENT_MSG);
+    expect(result).not.toBe("");
+  });
+
+  it("result contains the distinctive phrase 'Volunteer Coordinator'", () => {
+    const result = selectVoiceSkillAddendum("hr_volunteer_coordinator", ON_INTENT_MSG);
+    expect(result).toContain("Volunteer Coordinator");
+  });
+
+  it("result contains 'Org voice takes precedence'", () => {
+    const result = selectVoiceSkillAddendum("hr_volunteer_coordinator", ON_INTENT_MSG);
+    expect(result).toContain("Org voice takes precedence");
+  });
+
+  it("returns '' for hr_volunteer_coordinator + off-intent message", () => {
+    const result = selectVoiceSkillAddendum("hr_volunteer_coordinator", OFF_INTENT_MSG);
+    expect(result).toBe("");
+  });
+
+  it("returns '' for development_director + volunteer-intent message (wrong archetype)", () => {
+    const result = selectVoiceSkillAddendum("development_director", ON_INTENT_MSG);
+    expect(result).toBe("");
+  });
+
+  it("returns '' for events_director + volunteer-intent message (wrong archetype)", () => {
+    const result = selectVoiceSkillAddendum("events_director", ON_INTENT_MSG);
+    expect(result).toBe("");
+  });
+
+  // Over-firing guards per PRD §8
+  it("returns '' for hr_volunteer_coordinator on 'write a thank-you letter to our major donor'", () => {
+    const result = selectVoiceSkillAddendum("hr_volunteer_coordinator", "write a thank-you letter to our major donor");
+    expect(result).toBe("");
+  });
+
+  it("returns '' for hr_volunteer_coordinator on 'draft the ED report for the board'", () => {
+    const result = selectVoiceSkillAddendum("hr_volunteer_coordinator", "draft the ED report for the board");
+    expect(result).toBe("");
+  });
+});
