@@ -1823,3 +1823,38 @@ Fast-follow batch adding donor-voice + board-comms to the VOICE_SKILLS registry,
 ### Deferred
 
 No items deferred. All three voice skills are now shipped.
+
+
+---
+
+## 2026-06-02 — Eventbrite Integration (Events Director): one-click OAuth + read-only tools
+
+**Agent:** Sonnet coding agent (spawned by Lopmon)
+**Branch:** `feat/eventbrite-events-director` (off main `ef081ba`)
+**PRD:** `~/life/projects/edify-os/PRD-eventbrite-events-director-2026-06-02.md`
+
+Wired a real one-click OAuth flow for Eventbrite so the **Events Director** (`events_director`) can read events, attendees, and ticket-sales data via live API calls. Mirrored the shipped Mailchimp integration exactly (CSRF state cookie, `getAppOrigin()` redirect URI, `encrypt`/`decryptIfEncrypted`, service-role upsert on `org_id,type`, generic `/api/integrations` status+disconnect). No DB migration, no schema change, no api-key paste path. v1 is READ-ONLY (no create/publish/email).
+
+### Files created
+- `apps/web/src/lib/eventbrite-oauth.ts` — state-cookie name + `getEventbriteRedirectUri()` (twin of mailchimp-oauth.ts)
+- `apps/web/src/app/api/integrations/eventbrite/connect/route.ts` — GET → redirect to Eventbrite authorize; 500 if creds missing
+- `apps/web/src/app/api/integrations/eventbrite/callback/route.ts` — token exchange + resolve org via `/users/me/organizations/` + encrypted upsert; graceful `?eventbrite=denied&reason=no_organization` when account has zero orgs
+- `apps/web/src/lib/tools/eventbrite.ts` — 4 read-only tools (`eventbrite_list_events`, `eventbrite_get_event`, `eventbrite_list_attendees`, `eventbrite_event_sales_summary`) + `executeEventbriteTool` + `EVENTBRITE_TOOLS_ADDENDUM` + `EventbriteError` + `eventbriteFetch` helper + NOT-CONNECTED sentinel
+
+### Files edited
+- `apps/web/src/lib/crypto.ts` — added `CRYPTO_LABEL_EVENTBRITE_TOKEN`
+- `apps/web/src/lib/tools/registry.ts` — import + re-export addendum + `buildSystemAddendums` branch + `...eventbriteTools` in `events_director` + `eventbrite_` dispatch branch
+- `apps/web/src/app/dashboard/integrations/page.tsx` — `EVENTBRITE_INTEGRATION_IDS` set, `hasRealOAuthFlow` wired, `loadEventbriteStatus` + effect, connect-click branch, `?eventbrite=connected|denied` toast effect, disconnect branch (generic DELETE). Card display untouched (copy/icon/category/agentsUsing unchanged).
+
+### Build / verify
+- `pnpm install --frozen-lockfile` (worktree had no node_modules) — OK
+- `pnpm --filter web run typecheck` (tsc --noEmit) — **PASS, 0 errors**
+- `pnpm --filter web build` (next build) — **PASS**: "Compiled successfully", lint+types valid, both eventbrite routes registered, integrations page rebuilt clean
+
+### Judgment calls / deviations
+- `next lint` standalone prompts for interactive ESLint config (no standalone eslintrc), so verification was done via `typecheck` + full `build` (build runs Next's own lint+type pass). This satisfies PRD acceptance.
+- Sales-summary revenue: Eventbrite `cost.value` is in minor units (cents), so gross = `(value/100) * quantity_sold`. Free ticket classes reported as "Free".
+- Token stored ENCRYPTED via `encrypt()`; never logged.
+
+### Pending (Citlali-in-loop — §6)
+Live smoke test waits on: register Eventbrite OAuth app → `EVENTBRITE_CLIENT_ID` + `EVENTBRITE_CLIENT_SECRET` as Vercel Production env vars; redirect URI `https://edify-os.vercel.app/api/integrations/eventbrite/callback`. Code can merge to Draft PR before secrets exist.

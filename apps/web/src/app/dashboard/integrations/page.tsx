@@ -630,6 +630,9 @@ const CANVA_INTEGRATION_IDS = new Set(['canva']);
 /** Integration types backed by Mailchimp OAuth. */
 const MAILCHIMP_INTEGRATION_IDS = new Set(['mailchimp']);
 
+/** Integration types backed by Eventbrite OAuth. */
+const EVENTBRITE_INTEGRATION_IDS = new Set(['eventbrite']);
+
 /**
  * Integration ids that are brokered through Composio (OAuth on their end, we
  * just hold the connection reference). Keep in sync with TOOLKIT_SLUG in
@@ -660,7 +663,8 @@ function hasRealOAuthFlow(id: string): boolean {
     GOOGLE_INTEGRATION_IDS.has(id) ||
     COMPOSIO_INTEGRATION_IDS.has(id) ||
     CANVA_INTEGRATION_IDS.has(id) ||
-    MAILCHIMP_INTEGRATION_IDS.has(id)
+    MAILCHIMP_INTEGRATION_IDS.has(id) ||
+    EVENTBRITE_INTEGRATION_IDS.has(id)
   );
 }
 
@@ -743,6 +747,24 @@ function IntegrationsPageInner() {
   }, []);
 
   useEffect(() => { loadMailchimpStatus(); }, [loadMailchimpStatus]);
+
+  /* ---------- load Eventbrite connection status ---------- */
+
+  const loadEventbriteStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/integrations');
+      if (!res.ok) return;
+      const data = await res.json() as { connected: Array<{ integrationId: string }> };
+      const eventbriteRow = data.connected?.find((c) => c.integrationId === 'eventbrite');
+      if (eventbriteRow) {
+        setConnected((prev) => new Set([...prev, 'eventbrite']));
+      }
+    } catch {
+      // Non-fatal — UI degrades to disconnected state
+    }
+  }, []);
+
+  useEffect(() => { loadEventbriteStatus(); }, [loadEventbriteStatus]);
 
   /* ---------- load Composio (social) connection status ---------- */
 
@@ -853,6 +875,25 @@ function IntegrationsPageInner() {
     }
   }, [searchParams, router, loadMailchimpStatus]);
 
+  /* ---------- handle ?eventbrite=connected / denied toast ---------- */
+
+  useEffect(() => {
+    const eventbriteParam = searchParams.get('eventbrite');
+    if (eventbriteParam === 'connected') {
+      loadEventbriteStatus();
+      setToast({ message: 'Eventbrite connected! Your Events Director can now manage your events.', kind: 'success' });
+      router.replace('/dashboard/integrations', { scroll: false });
+    } else if (eventbriteParam === 'denied') {
+      const rawReason = searchParams.get('reason') ?? 'access_denied';
+      const reason = rawReason.slice(0, 100);
+      setToast({
+        message: `Eventbrite connection was not completed (${reason}). Please try again.`,
+        kind: 'error',
+      });
+      router.replace('/dashboard/integrations', { scroll: false });
+    }
+  }, [searchParams, router, loadEventbriteStatus]);
+
   /* ---------- auto-dismiss toast ---------- */
 
   useEffect(() => {
@@ -894,6 +935,12 @@ function IntegrationsPageInner() {
     // Mailchimp — redirect to initiate OAuth route
     if (MAILCHIMP_INTEGRATION_IDS.has(id)) {
       window.location.href = '/api/integrations/mailchimp/connect';
+      return;
+    }
+
+    // Eventbrite — redirect to initiate OAuth route
+    if (EVENTBRITE_INTEGRATION_IDS.has(id)) {
+      window.location.href = '/api/integrations/eventbrite/connect';
       return;
     }
 
@@ -1042,6 +1089,26 @@ function IntegrationsPageInner() {
         setToast({ message: 'Mailchimp disconnected.', kind: 'success' });
       } catch {
         setToast({ message: 'Failed to disconnect Mailchimp. Please try again.', kind: 'error' });
+      }
+      return;
+    }
+
+    // Eventbrite — call the generic DELETE endpoint
+    if (EVENTBRITE_INTEGRATION_IDS.has(id)) {
+      try {
+        const res = await fetch(
+          `/api/integrations?integrationId=${encodeURIComponent(id)}`,
+          { method: 'DELETE' }
+        );
+        if (!res.ok) {
+          setToast({ message: 'Failed to disconnect Eventbrite. Please try again.', kind: 'error' });
+          return;
+        }
+        setConnected((prev) => { const next = new Set(prev); next.delete(id); return next; });
+        setExpandedId(null);
+        setToast({ message: 'Eventbrite disconnected.', kind: 'success' });
+      } catch {
+        setToast({ message: 'Failed to disconnect Eventbrite. Please try again.', kind: 'error' });
       }
       return;
     }
