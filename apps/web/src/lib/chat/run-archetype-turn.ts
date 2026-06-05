@@ -652,7 +652,7 @@ export async function runArchetypeTurn({
                 orgId,
                 eventKey: `tool:${block.name}`,
                 archetypeSlug: archetype,
-                userId: memberId,
+                userId: null,
                 metadata: { tool_use_id: block.id },
               });
             }
@@ -745,7 +745,7 @@ export async function runArchetypeTurn({
       orgId,
       eventKey: "chat:turn_no_tools",
       archetypeSlug: archetype,
-      userId: memberId,
+      userId: null,
     });
   }
 
@@ -876,7 +876,7 @@ async function collectFileOutput(
       orgId: trackingCtx.orgId,
       eventKey: `skill:${ext}`,
       archetypeSlug: trackingCtx.archetype,
-      userId: trackingCtx.memberId,
+      userId: null,
       metadata: { file_id: fileId },
     });
   }
