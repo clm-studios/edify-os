@@ -1966,3 +1966,65 @@ I recommend **timeout→fallback-to-inline (option b in the bug ticket's framing
 ### Draft PR
 
 Opened as DRAFT against `main`. Awaiting Lopmon + Minervamon review.
+
+---
+
+## Session: docx-abort-inline-fallback — 2026-06-05
+
+**Identity:** Coding agent (Sonnet, spawned by Lopmon)
+**Branch:** `lopmon/docx-abort-inline-fallback`
+**Worktree:** `C:\Users\Araly\edify-os\.claude\worktrees\agent-af9cd08da32f66503`
+**Base:** `origin/main`
+**PRD:** `C:\Users\Araly\life\projects\edify-os\prd-docx-abort-inline-fallback-2026-06-05.md`
+**PR:** https://github.com/clm-studios/edify-os/pull/31
+
+### What was built
+
+Three-part fix for the Vercel Hobby 60s hard-kill / docx-stall issue.
+
+#### Part A — Server-side 55s self-imposed deadline (`run-archetype-turn.ts`)
+
+- Added `TURN_DEADLINE_MS = 55_000` constant (5s under the 60s Vercel ceiling).
+- Before each round of the tool-use loop, compute `remainingMs = turnDeadlineMs - Date.now()`. If already exhausted, set `turnDeadlineAborted` and break.
+- Create a per-round `AbortController` with a `setTimeout` that fires at `remainingMs`. Pass `{ signal: roundAbortController.signal }` as the second argument (`RequestOptions`) to all Anthropic SDK calls — both streaming (`.stream()`) and non-streaming (`.create()`), both beta and non-beta paths.
+- Added `AbortError` guard to `isTransient()` so abort errors are never retried.
+- Wrapped the `callWithRetryAndFallback` call in a `try/catch`; on `AbortError`: set `turnDeadlineAborted = true`, `loopHitCap = false`, break.
+- Clear the `deadlineTimer` on both normal completion and abort catch to avoid dangling timers.
+
+#### Part B — Inline fallback (strategy i)
+
+Chose **option (i)**: return whatever inline text the model produced in prior rounds + a `DOCX_TIMEOUT_NOTE` appended. This is the simplest path and always within budget.
+
+On `turnDeadlineAborted`:
+- If `lastAssistantText` is non-empty: return it + `DOCX_TIMEOUT_NOTE` ("The downloadable document build exceeded the time limit… You can retry to attempt the full document build.").
+- If no prior text (abort hit on round 0, extremely unlikely given typical 6s round-0 latency): return a standalone "request timed out, please retry" message.
+
+The route receives this as a normal return value (not a throw), proceeds to send the `done` SSE event, and updates `status='complete'` in the DB. No row ever stuck.
+
+#### Part C — Client stale-stream surfacing (`TeamChatClient.tsx`)
+
+Extended `projectErroredMessages` to handle two cases:
+1. `status='errored'` (existing) — stream died, finally/sweeper already landed terminal status.
+2. `status='streaming'` AND older than `STALE_STREAMING_MS = 70_000` ms — Vercel hard-kill bypassed finally. The sweeper runs only daily; this on-read check gives immediate retry affordance on page load/refresh.
+
+Both cases project to the existing `isError: true` shape so the `ErrorCard` + Retry button renders.
+
+### Inline-fallback strategy
+
+**Strategy (i)** chosen. Reasoning: the inline-text path is proven safe at ~39s (Minervamon 2026-06-03 field-op). Option (ii) — re-issue one round without code_execution — adds complexity and risks consuming the remaining ~5s budget. The model's round-0 output already contains a usable draft for LOI/deliverable turns, so surfacing it with a note is immediately useful.
+
+### Files changed
+
+- `apps/web/src/lib/chat/run-archetype-turn.ts` — deadline constants, per-round AbortController, abort catch, inline fallback post-loop handler
+- `apps/web/src/app/dashboard/team/[slug]/TeamChatClient.tsx` — `STALE_STREAMING_MS` constant, extended `projectErroredMessages` for stale streaming rows
+
+### Lint / typecheck
+
+- `pnpm --filter web lint` — no lint script exists in the web package (confirmed: `apps/web/package.json` has no "lint" entry). Noted as non-blocking.
+- `pnpm --filter web exec tsc --noEmit` — **passed, zero errors**.
+
+### Open questions / notes for Lopmon
+
+- The sweeper cron (`/api/cron/sweep-stuck-streams`) is scheduled `0 6 * * *` (daily). Part C's on-read staleness check fills the gap for users who load the page between sweeps, but if Citlali wants more frequent DB cleanup, the cron schedule could be tightened (requires Vercel dashboard edit — out of scope for this PR).
+- `DOMException` is used in the `setTimeout` abort callback (`new DOMException("...", "AbortError")`). Node.js 18+ supports this globally; Vercel Hobby targets Node 18. If there's ever a Node 16 constraint, replace with `Object.assign(new Error("Turn deadline exceeded"), { name: "AbortError" })`.
+- PR #31 is open, not merged. Awaiting Lopmon + Minervamon review per protocol.
