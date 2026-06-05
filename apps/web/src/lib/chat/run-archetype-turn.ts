@@ -40,6 +40,32 @@ import { classifyIntent, INTENT_CLASSIFIER_ENABLED } from "@/lib/chat/classify-i
 const TOOL_USE_LOOP_MAX = 8;
 const MAX_RESPONSE_TOKENS = 4096;
 
+// ---------------------------------------------------------------------------
+// Server-side self-imposed deadline — Part A of the docx-abort fix.
+//
+// Vercel Hobby hard-kills functions at 60s maxDuration, bypassing try/catch/finally
+// so the assistant DB row stays stuck at 'streaming' forever. By setting our own
+// deadline 5s UNDER the Vercel ceiling we can abort in-flight Anthropic SDK calls
+// via AbortSignal, emit a terminal SSE event, and persist a terminal DB status —
+// all before Vercel's kill fires.
+//
+// The confirmed docx-stall pattern (Minervamon 2026-06-03 field-op):
+//   round 0 = 6s (tool planning) → round 1 = docx-build in Anthropic container
+//   = killed at 60s. With TURN_DEADLINE_MS=55000 the abort fires ~5s before the
+//   ceiling, giving our code time to flush and persist.
+//
+// Non-docx turns complete in ~6-40s and are unaffected.
+// ---------------------------------------------------------------------------
+const TURN_DEADLINE_MS = 55_000;
+
+// ---------------------------------------------------------------------------
+// Inline fallback note — appended to whatever the model produced in prior
+// rounds when the docx-build round is aborted (Part B strategy: option i).
+// Surface the inline draft already generated rather than a blank error.
+// ---------------------------------------------------------------------------
+const DOCX_TIMEOUT_NOTE =
+  "\n\n---\n_The downloadable document build exceeded the time limit on this request. The draft above was generated inline. You can retry to attempt the full document build._";
+
 // B. Model ID map — "sonnet" is the interactive default; "haiku" for cheap workloads.
 // Exported so classify-intent.ts can reference the same strings without duplication.
 export const MODEL_IDS: Record<"sonnet" | "haiku", string> = {
@@ -323,6 +349,13 @@ export async function runArchetypeTurn({
   let ttftMs: number | null = null;
   let firstTokenSeen = false;
 
+  // Part A — self-imposed deadline, 5s under Vercel's 60s hard-kill ceiling.
+  // Compute once here so all rounds share the same absolute deadline regardless of
+  // how many rounds fire or how long they take.
+  const turnDeadlineMs = turnStartMs + TURN_DEADLINE_MS;
+  // Set to true when any round is aborted by our deadline signal.
+  let turnDeadlineAborted = false;
+
   // ---------------------------------------------------------------------------
   // Retry + Sonnet fallback helper (PR #16 C1 fix)
   //
@@ -337,6 +370,9 @@ export async function runArchetypeTurn({
   const RETRY_DELAYS_MS = [250, 750];
 
   function isTransient(err: unknown): boolean {
+    // Abort errors (from our deadline signal) must NOT be retried — they are
+    // intentional and should propagate immediately so the loop can handle them.
+    if (err instanceof Error && err.name === "AbortError") return false;
     if (err && typeof err === "object") {
       const status = (err as { status?: number }).status;
       if (typeof status === "number") return RETRYABLE_STATUSES.has(status);
@@ -393,12 +429,35 @@ export async function runArchetypeTurn({
     // Fix #1 — per-round timing: record when this round's API call starts.
     const roundStartMs = Date.now();
 
+    // Part A — per-round deadline enforcement.
+    // Compute remaining budget at the moment this round starts (not at turn start),
+    // so accumulating tool execution time is correctly counted against the budget.
+    const remainingMs = turnDeadlineMs - Date.now();
+    if (remainingMs <= 0) {
+      // Budget already exhausted before this round started — abort immediately.
+      console.warn("[runArchetypeTurn] deadline reached before round start", {
+        orgId, archetype, round, totalElapsedMs: Date.now() - turnStartMs,
+      });
+      turnDeadlineAborted = true;
+      loopHitCap = false;
+      break;
+    }
+
+    // Create a per-round AbortController that fires when our self-imposed deadline
+    // expires. The controller is cancelled (via clearTimeout) if the round completes
+    // normally so we don't leave dangling timers.
+    const roundAbortController = new AbortController();
+    const deadlineTimer = setTimeout(() => {
+      roundAbortController.abort(new DOMException("Turn deadline exceeded", "AbortError"));
+    }, remainingMs);
+
     // Use streaming API when an onTextDelta callback is provided.
     // Text deltas are pushed to the caller in real-time; we still await
     // finalMessage() to get the complete response for tool-use loop logic.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let response: any;
 
+    try {
     if (onTextDelta) {
       // Streaming path — use .stream() for real-time text deltas.
       // NOTE: if a Haiku stream emits text deltas before failing, the user sees partial
@@ -418,7 +477,7 @@ export async function runArchetypeTurn({
               : {}),
             ...(containerParam ? { container: containerParam } : {}),
             ...(mcpServers.length > 0 ? { mcp_servers: mcpServers } : {}),
-          });
+          }, { signal: roundAbortController.signal });
           stream.on("text", (textDelta) => {
             // Fix #1 — capture TTFT on the very first text delta (round 0 only).
             if (!firstTokenSeen) {
@@ -436,7 +495,7 @@ export async function runArchetypeTurn({
             system: systemBlocks,
             messages: loopMessages,
             ...(cachedTools.length > 0 ? { tools: cachedTools as unknown as Parameters<typeof anthropic.messages.create>[0]["tools"] } : {}),
-          });
+          }, { signal: roundAbortController.signal });
           stream.on("text", (textDelta) => {
             // Fix #1 — capture TTFT on the very first text delta (round 0 only).
             if (!firstTokenSeen) {
@@ -464,7 +523,7 @@ export async function runArchetypeTurn({
                 : {}),
               ...(containerParam ? { container: containerParam } : {}),
               ...(mcpServers.length > 0 ? { mcp_servers: mcpServers } : {}),
-            })
+            }, { signal: roundAbortController.signal })
           : anthropic.messages.create({
               model: mid,
               max_tokens: MAX_RESPONSE_TOKENS,
@@ -472,9 +531,26 @@ export async function runArchetypeTurn({
               system: systemBlocks,
               messages: loopMessages,
               ...(cachedTools.length > 0 ? { tools: cachedTools as unknown as Parameters<typeof anthropic.messages.create>[0]["tools"] } : {}),
-            }),
+            }, { signal: roundAbortController.signal }),
       round);
     }
+    } catch (roundErr) {
+      // Part A — catch abort errors from our deadline signal.
+      // Any other error is re-thrown to the outer loop error handler.
+      clearTimeout(deadlineTimer);
+      if (roundErr instanceof Error && roundErr.name === "AbortError") {
+        // Our self-imposed deadline fired. Surface the inline draft and break
+        // cleanly so the route can emit a terminal SSE event + persist the row.
+        console.warn("[runArchetypeTurn] deadline abort on round", {
+          orgId, archetype, round, totalElapsedMs: Date.now() - turnStartMs,
+        });
+        turnDeadlineAborted = true;
+        loopHitCap = false;
+        break;
+      }
+      throw roundErr;
+    }
+    clearTimeout(deadlineTimer);
 
     // Docx-stall triage: cheap content scan to flag a code-execution round —
     // one that carries code-exec tool-result blocks (which is where docx file
@@ -713,9 +789,28 @@ export async function runArchetypeTurn({
     break;
   }
 
-  // Loop cap hit — every round was tool_use with no final end_turn text.
-  // Surface a failure notice rather than silently using an interim assistant sentence.
-  if (loopHitCap) {
+  // Part A+B — deadline abort handling.
+  // When our self-imposed 55s deadline fired mid-round, surface whatever the model
+  // produced in prior rounds as an inline draft (Part B strategy i), then append
+  // a note so the user knows the downloadable build was cut short and can retry.
+  // This runs BEFORE the loopHitCap check so the abort path wins.
+  if (turnDeadlineAborted) {
+    const elapsed = Date.now() - turnStartMs;
+    console.warn("[runArchetypeTurn] Turn aborted by deadline", {
+      orgId, archetype, elapsedMs: elapsed, hadPartialText: !!lastAssistantText,
+    });
+    if (lastAssistantText) {
+      // Part B (strategy i): show the inline draft already generated + note.
+      finalAssistantText = lastAssistantText + DOCX_TIMEOUT_NOTE;
+    } else {
+      // No prior text at all (abort hit on round 0 — extremely unlikely given
+      // the 55s budget and typical 6s round 0 latency). Surface a clear message.
+      finalAssistantText =
+        "The request timed out before a response could be generated. Please retry — shorter or simpler requests are less likely to hit the time limit.";
+    }
+  } else if (loopHitCap) {
+    // Loop cap hit — every round was tool_use with no final end_turn text.
+    // Surface a failure notice rather than silently using an interim assistant sentence.
     console.warn("[runArchetypeTurn] Tool-use loop hit TOOL_USE_LOOP_MAX", {
       toolErrorCount,
       hadPartialText: !!lastAssistantText,
