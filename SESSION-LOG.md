@@ -2057,3 +2057,19 @@ The `isTransient()` AbortError guard (PR #31 semantics) auto-merged correctly �
 ### Typecheck
 
 `pnpm --filter web typecheck` — **PASS, 0 errors.**
+
+---
+
+## 2026-06-10 — FK follow-up: heartbeat daily_brief userId null (coding agent)
+
+**Branch:** `lopmon/fk-heartbeat-userid-null`
+**Worktree:** `C:\Users\Araly\edify-os\UsersAralyedify-worktreesfk-heartbeat-userid-null`
+**Task:** One-line fix identified by Minervamon during review of PR #32.
+
+**Problem:** `apps/web/src/app/api/heartbeat/trigger/route.ts` line 146 passed `userId: memberId` to `insertActivityEvent` for event key `heartbeat:daily_brief`. `memberId` is a `members.id` (UUID from the `members` table), but `activity_events.user_id` is a FK to `auth.users`. Passing a non-auth UUID causes a FK violation and silently drops the event, breaking the hours-saved counter for heartbeat check-ins.
+
+**Fix:** Changed `userId: memberId` → `userId: null` (same pattern as PR #32 applied to the chat write site).
+
+**Verification:** `pnpm --filter web typecheck` — passes.
+
+**PR:** Opened against `main`. Do not merge — Lopmon handles merges.
