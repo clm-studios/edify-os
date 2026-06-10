@@ -12,6 +12,7 @@
  * Returns the final assistant text plus any generated files.
  */
 
+import { createHash } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ARCHETYPE_PROMPTS, buildCustomNameInstruction } from "@/lib/archetype-prompts";
@@ -322,6 +323,39 @@ export async function runArchetypeTurn({
   const turnStartMs = Date.now();
   let ttftMs: number | null = null;
   let firstTokenSeen = false;
+
+  // [perf] cachehash — emitted once per turn, before the round loop.
+  // Logs sha256 hex digests + lengths/counts of each cached component to diagnose
+  // which byte is busting the Anthropic prompt-cache prefix match across requests.
+  // mcpSha vs mcpNoTokenSha isolates whether the per-request OAuth authorization_token
+  // is the unstable byte (lead hypothesis from Minervamon's 2026-06-03 field capture).
+  // SECURITY: raw tokens are never logged; sha256 is one-way and token-stripped variant is logged.
+  {
+    const sha = (s: string) => createHash("sha256").update(s).digest("hex");
+    const b1Sha = sha(stableSystemText);
+    const b1Len = stableSystemText.length;
+    const b2Sha = sha(conditionalAddendums);
+    const toolsSha = sha(JSON.stringify(cachedTools));
+    const toolCount = cachedTools.length;
+    const mcpSha = sha(JSON.stringify(mcpServers));
+    const mcpNoTokenSha = sha(
+      JSON.stringify(mcpServers.map((s) => ({ ...s, authorization_token: undefined })))
+    );
+    const mcpCount = mcpServers.length;
+    console.log("[perf] cachehash", {
+      orgId,
+      archetype,
+      modelId,
+      b1Sha,
+      b1Len,
+      b2Sha,
+      toolsSha,
+      toolCount,
+      mcpSha,
+      mcpNoTokenSha,
+      mcpCount,
+    });
+  }
 
   // ---------------------------------------------------------------------------
   // Retry + Sonnet fallback helper (PR #16 C1 fix)
