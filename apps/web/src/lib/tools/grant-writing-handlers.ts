@@ -23,7 +23,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getMemoryByCategory } from "@/lib/memory/get-by-category";
+import { getMemoryByCategory, serializeFunderProfileForPrompt } from "@/lib/memory/get-by-category";
 import { LOI_SECTION_PROMPT } from "@/lib/prompts/grant-writing/loi";
 import { STATEMENT_OF_NEED_SECTION_PROMPT } from "@/lib/prompts/grant-writing/statement-of-need";
 import { PROJECT_DESCRIPTION_SECTION_PROMPT } from "@/lib/prompts/grant-writing/project-description";
@@ -321,6 +321,47 @@ export async function executeDraftGrantContent({
     substrate = "(Proof library unavailable — draft without specific citations.)";
   }
 
+  // --- PR-B: Load funder profile for injection into Block-2 ---
+  //
+  // When draft_grant_content is called with a funder_name, load the org's
+  // funder_profile entry for that funder and serialize it for prompt injection.
+  //
+  // CACHE NOTE: The funder profile block is per-org/per-request content. It is
+  // placed in Block-2 (the uncached portion of systemBlocks) alongside the
+  // contextBlock and skillBody slot — NEVER in the cached Block-1 sectionPrompt.
+  // Block-1 (cache_control: ephemeral) is the stable section prompt only. The
+  // substrate (Block-1.5) is also uncached, and the funder profile joins it there.
+  // This mirrors the voiceSkillAddendum / frontendDesignAddendum pattern in
+  // run-archetype-turn.ts where per-turn content stays outside the cached prefix.
+  //
+  // No profile found → drafting proceeds as before + one-line suggestion (spec §consumption).
+  let funderProfileBlock: string | null = null;
+  let funderProfileSuggestion: string | null = null;
+
+  if (typed.funder_name) {
+    try {
+      const profileEntries = await getMemoryByCategory(
+        serviceClient,
+        orgId,
+        "funder_profile",
+        { funderName: typed.funder_name, limit: 1, order: "desc" }
+      );
+
+      if (profileEntries.length > 0) {
+        funderProfileBlock = serializeFunderProfileForPrompt(profileEntries[0]);
+      } else {
+        // No profile: one-line suggestion (not an error — drafting continues as today)
+        funderProfileSuggestion =
+          `Note: No funder profile found for "${typed.funder_name}". ` +
+          `The Dev Director can build one using the research_funder workflow (save_funder_profile tool) ` +
+          `to unlock funder-informed framing, calibrated ask size, and counter-signal addressing in future drafts.`;
+      }
+    } catch (err) {
+      // Non-fatal: profile load failure falls back to no-profile path
+      console.warn("[grant-writing] Funder profile load error:", err);
+    }
+  }
+
   const sectionPrompt = getSectionPrompt(mvpType);
 
   // Assemble context addendum from user inputs
@@ -342,21 +383,49 @@ export async function executeDraftGrantContent({
   // the grant-narrative.md skill body loaded from the skills directory.
   const skillBody: string | null = null;
 
-  // Build system blocks with prompt caching on archetype + substrate
+  // ---------------------------------------------------------------------------
+  // System blocks — Block-1 (cached) / Block-2 (uncached) split
+  //
+  // Block-1 (cache_control: ephemeral): sectionPrompt — stable per section type.
+  //   Identical for every draft of this section type, so the cache stays warm.
+  //
+  // Block-2 (no cache_control): everything per-request:
+  //   - substrate (proof library entries — org-specific but excluded from cache
+  //     because funderName filtering makes them request-variable)
+  //   - funderProfileBlock — per-org/per-funder content: MUST be Block-2.
+  //     funder_profile is per-org/per-request; placing it in Block-1 would
+  //     make it a moving byte and bust the cross-request cache instability
+  //     that PR #30's diagnostic is tracking. Mirrors voiceSkillAddendum in
+  //     run-archetype-turn.ts (line ~263): intent-conditional content stays
+  //     outside the cached prefix.
+  //   - contextBlock + draft instruction
+  //   - skillBody slot (PRD §F8 forward-compat, null in MVP)
+  // ---------------------------------------------------------------------------
   const systemBlocks: Anthropic.TextBlockParam[] = [
+    // Block-1: stable section prompt (CACHED)
     {
       type: "text",
       text: sectionPrompt,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       cache_control: { type: "ephemeral" } as any,
     },
+    // Block-2: per-request content (NOT cached)
     {
       type: "text",
       text: substrate.length > 0 ? substrate : "(No proof library entries found for this org.)",
     },
+    // Funder profile block — injected into Block-2 (uncached) when available.
+    // Placement: AFTER substrate, BEFORE the draft instruction, so the model
+    // sees proof-library context first, then funder-specific guidance, then
+    // the instruction to draft. This is the same region where voiceSkillAddendum
+    // and toolAddendums land in run-archetype-turn.ts (conditionalAddendums, Block-2).
+    ...(funderProfileBlock ? [{
+      type: "text" as const,
+      text: `---\n${funderProfileBlock}\n---\n`,
+    }] : []),
     {
       type: "text",
-      text: `${contextBlock}Draft the ${mvpType.replace(/_/g, " ")} now. Every specific number, prior outcome, or voice phrasing MUST cite [entry_id] where entry_id is the id shown in brackets in the proof library above. Do not invent numbers or quotes.`,
+      text: `${contextBlock}Draft the ${mvpType.replace(/_/g, " ")} now. Every specific number, prior outcome, or voice phrasing MUST cite [entry_id] where entry_id is the id shown in brackets in the proof library above. Claims sourced from the funder profile above cite [cited: funder_profile]. Do not invent numbers or quotes.`,
     },
     // Forward-compat slot: skillBody injected here when skill-routing pattern ships.
     ...(skillBody ? [{ type: "text" as const, text: skillBody }] : []),
@@ -406,6 +475,12 @@ export async function executeDraftGrantContent({
       draft = annotateMissingCitations(draft);
       draft += "\n\n---\n_Note: Some claims above are marked [?] (missing citation). Please verify these figures against your records before submitting._";
     }
+  }
+
+  // Append no-profile suggestion when no funder profile was found (spec §consumption).
+  // This is a one-line addition to the tool result — not an error, just a suggestion.
+  if (funderProfileSuggestion && draft) {
+    draft = `${draft}\n\n---\n_${funderProfileSuggestion}_`;
   }
 
   return { content: draft };

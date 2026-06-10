@@ -1582,6 +1582,97 @@ Fix 4 demo-blocking defects from Minervamon's post-merge review of PR #21:
 
 ---
 
+# SESSION-LOG — Funder Profile Read Side Agent (PR-B)
+
+**Identity:** Coding agent (Sonnet, spawned by Lopmon)
+**Branch:** `lopmon/funder-profile-read`
+**Worktree:** `C:\Users\Araly\edify-worktrees\funder-profile-read`
+**Base:** `origin/main` @ merge of PR #35 (save_funder_profile write side)
+**Date:** 2026-06-10
+**Task:** Build the read side (PR-B) of the funder-profile feature per PRD `prd-funder-profile-engineering.md`.
+
+---
+
+## Plan executed
+
+1. Read PRD + content spec in full.
+2. Verified Block-1/Block-2 boundary in `run-archetype-turn.ts` (lines 251-267) before writing any injection code.
+3. Read `grant-writing.ts` — `funder_name` param already exists as optional field on `draft_grant_content` (added in PR-A / base schema, line 103). No new param needed.
+4. Read `grant-writing-handlers.ts` — identified injection point in `executeDraftGrantContent`.
+5. Read `get-by-category.ts` — identified location for new serializer beside `serializePriorGrantsForPrompt`.
+6. Implemented serializer + staleness logic + handler injection + tests.
+7. All 225 tests pass, typecheck clean.
+
+---
+
+## Block-1/Block-2 boundary identification
+
+`run-archetype-turn.ts` lines 251-267 (comment "Fix #2 — Split stable vs conditional system prompt"):
+
+- **Block-1 (CACHED):** `stableSystemText = systemPrompt + orgContext + toolAddendums` — sent with `cache_control: { type: "ephemeral" }`.
+- **Block-2 (NOT cached):** `conditionalAddendums = skillsAddendum + frontendDesignAddendum + voiceSkillAddendum` — sent as a separate text block with NO `cache_control`.
+
+In `executeDraftGrantContent` (grant-writing-handlers.ts), the sub-call to Claude has its own `systemBlocks`:
+- `systemBlocks[0]` = `sectionPrompt` with `cache_control: ephemeral` — **Block-1/cached**
+- `systemBlocks[1]` = substrate (proof library) — no cache_control — **Block-2/uncached**
+- `systemBlocks[2]` = funder profile block (new, PR-B) — no cache_control — **Block-2/uncached**
+- `systemBlocks[3]` = `contextBlock` + draft instruction — no cache_control — **Block-2/uncached**
+- `systemBlocks[4]` = skillBody slot (null in MVP, conditional) — Block-2
+
+The funder profile block is placed after substrate and before the draft instruction. This is the same region as `voiceSkillAddendum` and `frontendDesignAddendum` in the outer loop.
+
+---
+
+## Code changes
+
+### `apps/web/src/lib/memory/get-by-category.ts`
+
+Added two exported functions beside `serializePriorGrantsForPrompt`:
+
+- `checkFunderProfileStaleness(data, today?)` — returns `{ profileStale, deadlineFieldsStale, profileAgeMs, deadlineAgeMs }`. Uses `refreshed_on ?? built_on` for 6-month horizon; uses `process_and_calendar.retrieved_date` for 90-day horizon. Accepts `today` param for testability without Date mocking.
+- `serializeFunderProfileForPrompt(entry, today?)` — serializes a `funder_profile` MemoryEntryRow into a human-readable prompt block. Opens with STALE warnings when either horizon is exceeded. All section outputs carry `[cited: funder_profile]` tags. Covers all 8 spec fields.
+
+### `apps/web/src/lib/tools/grant-writing-handlers.ts`
+
+- Added `serializeFunderProfileForPrompt` to the import from `get-by-category`.
+- In `executeDraftGrantContent`, after `buildSubstrate` and before `getSectionPrompt`:
+  - Loads `funder_profile` entries via `getMemoryByCategory(serviceClient, orgId, "funder_profile", { funderName: typed.funder_name, limit: 1 })`.
+  - If profile found: serializes with `serializeFunderProfileForPrompt` → stored in `funderProfileBlock`.
+  - If no profile: stores the one-line suggestion in `funderProfileSuggestion`.
+- In `systemBlocks` assembly: funder profile block is spread-inserted AFTER substrate block (index 1) and BEFORE the draft instruction block — no `cache_control` on this block (Block-2/uncached).
+- Draft instruction updated to mention `[cited: funder_profile]` citation convention.
+- After draft generation: appends `funderProfileSuggestion` to result content when no profile was found (not an error).
+
+### `apps/web/src/lib/tools/__tests__/grant-writing-funder-profile.test.ts` (new)
+
+32 new tests organized by criterion:
+- **SR** (8): Serializer output shape — sections, citations, relationship history handling
+- **S1** (5): Profile staleness horizon (6 months) — checkFunderProfileStaleness + serializer warning
+- **S2** (5): Deadline staleness horizon (90 days) — checkFunderProfileStaleness + serializer warning; combined both warnings
+- **VP** (3): Citation validator pass-through — `[cited: funder_profile]` tags are preserved/not destroyed by annotation pass; current regex behavior documented
+- **I1** (5): Injection with profile present — Block-1 has cache_control, funder profile block has NO cache_control, placement after Block-1 and before draft instruction, citation tags present
+- **I2** (4): No profile path — no profile block in systemBlocks, suggestion appended, no suggestion without funder_name, drafting still produces output
+
+---
+
+## Citation validator pass-through finding
+
+The existing `hasCitation` regex `/\[\w[\w-]*\]|\[\d+\]/` does NOT match `[cited: funder_profile]` — the space and colon inside the bracket prevent the match. Numbers adjacent to `[cited: funder_profile]` in draft output will be annotated with `[?]` by `annotateMissingCitations`, same as if no citation were present.
+
+"Pass-through" behavior confirmed: the annotation pass does not DESTROY or modify the `[cited: funder_profile]` tag text itself — the tag survives in the output. The validator is neutral/agnostic to this citation format. Test VP documents this behavior.
+
+This is documented in the test file and the PR description. Modifying the validator to recognize this format is explicitly out of scope per PRD.
+
+---
+
+## Test results
+
+- 225 tests pass (3 test files: funder-profile.test.ts, grant-writing-funder-profile.test.ts, voice-skills.test.ts)
+- 32 new tests added (all in grant-writing-funder-profile.test.ts)
+- TypeScript typecheck: exit 0 (clean)
+
+---
+
 ## Code changes
 
 ### C1 — `apps/web/src/components/grants/GrantDetailDrawer.tsx`
