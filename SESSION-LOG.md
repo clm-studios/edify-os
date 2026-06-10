@@ -2028,3 +2028,32 @@ Both cases project to the existing `isError: true` shape so the `ErrorCard` + Re
 - The sweeper cron (`/api/cron/sweep-stuck-streams`) is scheduled `0 6 * * *` (daily). Part C's on-read staleness check fills the gap for users who load the page between sweeps, but if Citlali wants more frequent DB cleanup, the cron schedule could be tightened (requires Vercel dashboard edit — out of scope for this PR).
 - `DOMException` is used in the `setTimeout` abort callback (`new DOMException("...", "AbortError")`). Node.js 18+ supports this globally; Vercel Hobby targets Node 18. If there's ever a Node 16 constraint, replace with `Object.assign(new Error("Turn deadline exceeded"), { name: "AbortError" })`.
 - PR #31 is open, not merged. Awaiting Lopmon + Minervamon review per protocol.
+
+---
+
+## Session: pr31-conflict-fix — 2026-06-10
+
+**Identity:** Coding agent (Sonnet, spawned by Lopmon)
+**Branch:** `pr31-conflict-fix-tmp` (pushes to `lopmon/docx-abort-inline-fallback`)
+**Worktree:** `C:\Users\Araly\edify-worktrees\pr31-conflict-fix`
+**Task:** Resolve merge conflicts between PR #31 (`lopmon/docx-abort-inline-fallback`) and `origin/main` after PR #30 (`lopmon/cache-sha256-diagnostic`) was squash-merged.
+
+### Conflict resolution
+
+Only one file actually conflicted — `apps/web/src/lib/chat/run-archetype-turn.ts`. The other two files (`TeamChatClient.tsx`, `SESSION-LOG.md`) auto-merged cleanly.
+
+**`run-archetype-turn.ts`** — Single conflict hunk at ~line 353. The conflict was between:
+- HEAD (PR #31): `turnDeadlineMs` + `turnDeadlineAborted` variable declarations (Part A deadline setup).
+- `origin/main` (PR #30): `[perf] cachehash` diagnostic block (sha256 digest of cached components).
+
+Resolution: kept BOTH blocks in sequence — deadline vars first (as they were), cachehash block immediately after. The two changes are logically independent (deadline vars initialize loop state; cachehash block is a diagnostic log that runs once before the loop). No lines were dropped from either PR.
+
+The `isTransient()` AbortError guard (PR #31 semantics) auto-merged correctly — it is present in the resolved file. The PR #30 `import { createHash } from "crypto"` also auto-merged correctly at the top of the file.
+
+**`TeamChatClient.tsx`** — Auto-merged cleanly. Verified: `STALE_STREAMING_MS = 70_000` and `isStaleStreaming` logic from PR #31 are present intact.
+
+**`SESSION-LOG.md`** — Auto-merged cleanly. Both the 2026-06-03 triage entry and the 2026-06-05 docx-abort entry are present. PR #30 had no SESSION-LOG entry.
+
+### Typecheck
+
+`pnpm --filter web typecheck` — **PASS, 0 errors.**
