@@ -2339,3 +2339,51 @@ No sourcing-discipline gap found. FUNDER_PROFILE_TOOLS_ADDENDUM already covers c
 - voice-skills.test.ts: 151 tests, all passing, untouched
 - Total passing: 193 (151 + 42)
 - Typecheck: 0 errors
+
+---
+
+## PR-C — citation-regex-cited-tags (2026-06-10)
+
+**Identity:** Coding agent (Sonnet, spawned by Lopmon)
+**Branch:** `lopmon/citation-regex-cited-tags`
+**Worktree:** `C:\Users\Araly\edify-os\UsersAralyedify-worktreescitation-regex-fix`
+**Base:** `origin/main` @ `0882b6d` (post PR #36)
+**Task:** Fast-follow to PR #35/#36 — make citation validator recognise `[cited: funder_profile]` and `[cited: <source>, <date>]` tags.
+
+### Problem
+
+`detectUncitedClaims` and `annotateMissingCitations` used the inline regex `/\[\w[\w-]*\]|\[\d+\]/` at four call sites (lines 237, 252, 270, 278 on main). The colon+space inside `[cited: funder_profile]` caused `.test()` to return false, so figures adjacent to funder-cited facts were spuriously annotated with `[?] (missing citation)`. This contradicted the content spec ("the existing validator covers funder facts exactly like org facts").
+
+### Changes
+
+#### `apps/web/src/lib/tools/grant-writing-handlers.ts`
+
+- Extracted new module-level constant at line 221 (Citation validation section):
+  ```
+  const CITATION_RE = /\[cited:[^\]]+\]|\[\w[\w-]*\]|\[\d+\]/;
+  ```
+  No flags — used with `.test()` only (safe to share; no lastIndex state).
+- Replaced all 4 inline `/\[\w[\w-]*\]|\[\d+\]/` literals with `CITATION_RE.test(window)`.
+  Call sites at (adjusted lines): detectUncitedClaims number loop, detectUncitedClaims quote loop, annotateMissingCitations number pass, annotateMissingCitations quote pass.
+
+#### `apps/web/src/lib/tools/__tests__/grant-writing-funder-profile.test.ts`
+
+VP describe block updated to assert NEW correct behavior:
+- Added local `CITATION_RE` mirror constant (same regex, no import needed).
+- Old test `"[cited: funder_profile] tags are valid strings that do not throw in the regex context"` (expected `hasCitation = false`) — **removed/replaced**.
+- New test `"CITATION_RE matches [cited: funder_profile]"` — asserts `true`.
+- New test `"CITATION_RE matches [cited: <source>, <date>] full form"` — covers the fuller cited form.
+- New test `"numbers adjacent to [cited: funder_profile] pass clean — no [?] annotation"` — core spec conformance assertion using `CITATION_RE`.
+- New test `"genuinely uncited figure still gets [?] annotation (negative case)"` — ensures the validator still catches real misses.
+- Old pass-through preservation test retained and updated to use `CITATION_RE`.
+
+### Verification
+
+- `pnpm --filter web typecheck` — passed, no errors.
+- `pnpm --filter web test` — 227/227 tests passed (3 test files).
+  - VP suite: 5 tests, all green.
+
+### PR
+
+Opened as PR-C (do NOT merge — awaiting Minervamon review).
+References PRs #35 and #36.

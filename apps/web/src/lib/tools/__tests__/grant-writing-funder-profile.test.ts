@@ -354,20 +354,15 @@ describe("S2 — staleness: deadline/cycle fields older than 90 days", () => {
 // VP. Citation validator pass-through for [cited: funder_profile]
 // ---------------------------------------------------------------------------
 
+// Shared CITATION_RE — mirrors the constant in grant-writing-handlers.ts.
+// Kept here so VP tests exercise the same regex logic without importing
+// the unexported constant.
+const CITATION_RE = /\[cited:[^\]]+\]|\[\w[\w-]*\]|\[\d+\]/;
+
 describe("VP — citation validator pass-through for [cited: funder_profile]", () => {
-  // Import the internal helpers via dynamic import of the handler module.
-  // These are not exported — test them indirectly via detectUncitedClaims behavior.
-  //
-  // Strategy: we verify that the annotateMissingCitations pass PRESERVES the
-  // [cited: funder_profile] tag text (does not destroy it). This is the
-  // "pass-through" behavior: the validator does not strip or modify the tags.
-  //
-  // Current behavior note: the hasCitation regex /\[\w[\w-]*\]|\[\d+\]/ does
-  // not match [cited: funder_profile] (space+colon inside bracket). Numbers
-  // adjacent to [cited: funder_profile] will be annotated with [?] by
-  // annotateMissingCitations — same as if no citation were present. The
-  // [cited: funder_profile] tag itself is NOT destroyed by the annotation pass.
-  // This is the validator's neutral pass-through behavior for this citation format.
+  // Tests verify that CITATION_RE correctly recognises [cited: funder_profile]
+  // and [cited: <source>, <date>] tags so that numbers adjacent to funder-cited
+  // figures pass the citation validator clean (no [?] annotation).
 
   it("serializeFunderProfileForPrompt output contains [cited: funder_profile] tags", () => {
     // The serialized block contains these tags in the system prompt.
@@ -377,52 +372,61 @@ describe("VP — citation validator pass-through for [cited: funder_profile]", (
     expect(result).toContain("[cited: funder_profile]");
   });
 
-  it("[cited: funder_profile] tags are valid strings that do not throw in the regex context", () => {
-    // Confirm the citation tag format does not cause regex errors in the
-    // validator's hasCitation test window — it simply doesn't match, returning false.
+  it("CITATION_RE matches [cited: funder_profile]", () => {
+    // After PR-C: the updated regex DOES match [cited: funder_profile].
+    // Numbers adjacent to this tag must pass clean — no [?] annotation.
     const citationTag = "[cited: funder_profile]";
-    const hasCitation = /\[\w[\w-]*\]|\[\d+\]/.test(citationTag);
-    // The existing regex does NOT match [cited: funder_profile] (space/colon inside).
-    // This is the documented current behavior — numbers near this tag will still
-    // be flagged as uncited by detectUncitedClaims (pass-through = tag preserved, not recognized).
-    expect(hasCitation).toBe(false);
-    // Crucially: the regex test itself does not throw
+    const hasCitation = CITATION_RE.test(citationTag);
+    expect(hasCitation).toBe(true);
   });
 
-  it("[cited: funder_profile] text is preserved (not modified) when draft is annotated", () => {
-    // When annotateMissingCitations runs on draft text containing [cited: funder_profile],
-    // the citation tag itself must survive intact in the output.
-    // We test this by checking the tag appears in draft text and
-    // confirming serializeFunderProfileForPrompt's output always contains it.
-    const entry = makeFunderProfileEntry();
-    const profileBlock = serializeFunderProfileForPrompt(entry);
+  it("CITATION_RE matches [cited: <source>, <date>] full form", () => {
+    const fullCitedTag = "[cited: 990-PF FY2024 via foundation_grants, 2026-01-15]";
+    expect(CITATION_RE.test(fullCitedTag)).toBe(true);
+  });
 
-    // The block is injected into the system prompt — not into the draft output.
-    // In the draft output, the MODEL writes [cited: funder_profile] tags.
-    // A draft containing that tag:
-    const mockDraft = 'This funder prefers direct-service programs [cited: funder_profile]. Their median grant is $40,000 [cited: funder_profile].';
+  it("numbers adjacent to [cited: funder_profile] pass clean — no [?] annotation", () => {
+    // Core spec-conformance assertion: a figure with a nearby [cited: funder_profile]
+    // tag must NOT receive a [?] (missing citation) annotation.
+    const mockDraft = 'Their median grant is $40,000 [cited: funder_profile]. They fund ~52 grants per year [cited: funder_profile].';
 
-    // Running the annotation pass (simulated): check that [cited: funder_profile] is NOT
-    // removed from the string by a simple regex pass over numbers.
-    // The annotation pass replaces uncited numbers — not [cited:...] tags themselves.
-    // Regex that would represent annotateMissingCitations's number pass:
     const annotated = mockDraft.replace(
       /\b(\d{2,}(?:[,]\d{3})*(?:\.\d+)?%?)\b/g,
       (match: string, _num: string, offset: number) => {
         const clean = match.replace(/[,%]/g, "");
         if (clean.length === 4 && (clean.startsWith("19") || clean.startsWith("20"))) return match;
         const window = mockDraft.slice(Math.max(0, offset - 80), offset + 80);
-        const hasCitation = /\[\w[\w-]*\]|\[\d+\]/.test(window);
+        const hasCitation = CITATION_RE.test(window);
         if (!hasCitation) return `${match} [?] _(missing citation)_`;
         return match;
       }
     );
 
-    // [cited: funder_profile] tags must survive in the annotated output
+    // [?] must NOT appear — the figures are cited
+    expect(annotated).not.toContain("[?]");
+    // [cited: funder_profile] tags survive intact in the output
     expect(annotated).toContain("[cited: funder_profile]");
+  });
 
-    // Profile block tag also survives (it's in the system prompt, not draft)
-    expect(profileBlock).toContain("[cited: funder_profile]");
+  it("genuinely uncited figure still gets [?] annotation (negative case)", () => {
+    // A number with NO citation tag in its 80-char window must still be flagged.
+    const mockDraftUncited = 'We serve 250 youth annually. Our budget is $180,000.';
+
+    const annotated = mockDraftUncited.replace(
+      /\b(\d{2,}(?:[,]\d{3})*(?:\.\d+)?%?)\b/g,
+      (match: string, _num: string, offset: number) => {
+        const clean = match.replace(/[,%]/g, "");
+        if (clean.length === 4 && (clean.startsWith("19") || clean.startsWith("20"))) return match;
+        const window = mockDraftUncited.slice(Math.max(0, offset - 80), offset + 80);
+        const hasCitation = CITATION_RE.test(window);
+        if (!hasCitation) return `${match} [?] _(missing citation)_`;
+        return match;
+      }
+    );
+
+    // Both figures are uncited — both must be annotated
+    expect(annotated).toContain("250 [?]");
+    expect(annotated).toContain("180,000 [?]");
   });
 });
 
