@@ -2212,3 +2212,39 @@ The `isTransient()` AbortError guard (PR #31 semantics) auto-merged correctly �
 - NO changes to websearch.ts max_uses (still 5/turn)
 - PR NOT merged — awaiting Minervamon review
 
+
+---
+
+## 2026-06-10 — PR #35 descope: remove out-of-scope research-funder voice skill
+
+**Agent:** Coding agent (Sonnet, spawned by Lopmon)
+**Worktree:** `C:\Users\Araly\edify-worktrees\pr35-descope` (mapped to `C:\Users\Araly\edify-os\UsersAralyedify-worktreespr35-descope`)
+**Branch:** `pr35-descope-tmp` → pushed to `origin/lopmon/funder-profile-write`
+
+### What was removed
+
+- `RESEARCH_FUNDER_ADDENDUM` constant + `research-funder` registry entry (first item in `VOICE_SKILLS`) from `apps/web/src/lib/skills/registry.ts` — reverted to `origin/main` state entirely (PR #35 should not touch that file at all).
+- 7 voice-skill tests from `apps/web/src/lib/tools/__tests__/funder-profile.test.ts`: the `describe("research-funder voice skill — registry", ...)` block (exercises VOICE_SKILLS + selectVoiceSkillAddendum).
+
+### What was kept
+
+- `FUNDER_PROFILE_TOOLS_ADDENDUM` in `apps/web/src/lib/tools/funder-profile.ts` — tool-side workflow choreography (research_funder workflow, sourcing rules, field-by-field guidance). This is in-scope per the PRD.
+- `buildSystemAddendums` wiring in `apps/web/src/lib/tools/registry.ts` — unchanged.
+- All 42 remaining tests in `funder-profile.test.ts`: V1–V6 validation, refresh semantics, error visibility, and registry-gating tests.
+
+### Provenance discipline
+
+Voice-skill craft content at CLM is authored by Minervamon. The RESEARCH_FUNDER_ADDENDUM was agent-composed (not sourced from Minervamon's verbatim files) and cannot ship. The tool-side addendum (FUNDER_PROFILE_TOOLS_ADDENDUM) is workflow choreography authored as part of this agent's task and is in scope.
+
+### Gap assessment (step 5)
+
+No sourcing-discipline gap found. FUNDER_PROFILE_TOOLS_ADDENDUM already covers citation discipline ([cited: source, date]), [need:] discipline, verbatim-phrases rule for §2, no-fabricated-grantees rule for §3, counter-signals requirement for §4, and concrete next-action rule for §5. The craft-layer content that existed only in the voice skill was presentation/emphasis narrative, not structurally unique sourcing rules.
+
+### Results
+
+- `apps/web/src/lib/skills/registry.ts`: matches `origin/main` exactly (diff: empty)
+- Tests removed: 7 (voice-skill registration + trigger tests)
+- Tests kept: 42 (validation V1–V6, refresh, error visibility, registry gating)
+- voice-skills.test.ts: 151 tests, all passing, untouched
+- Total passing: 193 (151 + 42)
+- Typecheck: 0 errors

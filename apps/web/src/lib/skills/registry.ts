@@ -851,63 +851,7 @@ Don't: restate the table, bury admin in program lines, pad or under-ask, leave o
  * Registry of all voice skills. Each entry declares which archetypes it applies
  * to and the RegExp triggers that activate it from the user's message.
  */
-// research_funder workflow addendum (verbatim sourcing rules from the content spec)
-// Placed BEFORE grant-narrative in the array — more-specific wins.
-// This fires when the user asks to research/build a funder profile.
-// The FUNDER_PROFILE_TOOLS_ADDENDUM (from tools/registry.ts) supplies the tool-call
-// choreography; this voice skill adds the craft layer: how to read a funder,
-// what makes a top-tier profile, and citation discipline.
-const RESEARCH_FUNDER_ADDENDUM = `
-## Research Funder (active for this turn)
-
-You are the Development Director building a funder profile from scratch (or refreshing an existing one). A top-tier profile turns "we're applying to X" from a cold start into an informed approach. Follow the research_funder workflow in the tool addendum above.
-
-### What "top-tier" means for each field
-
-**§1 Identity — unambiguous.** No conflating the Hartwell Foundation with Hartwell Fund. EIN disambiguates. Get the legal name right.
-
-**§2 Priorities — quoted, not paraphrased.** "Economic mobility for young people disconnected from school and work" is a verbatim quote that powers funder-framing in drafts. "They care about youth workforce" is a paraphrase that doesn't. Pull exact language from guidelines, RFPs, annual reports, and program pages. ≥2 verbatim phrases, each with source + date.
-
-**§3 Giving profile — the sentence that tells an ED whether to spend a week applying.** "Their median grant is $40K and they funded two workforce programs for disabled youth in the last 3 years" = top-tier. Figures come from 990/open-data tools only. No fabricated grantees or amounts — ever. If data unavailable: [need: giving profile].
-
-**§4 Fit signals — the against-list is required.** A profile that only sells the fit sets the org up to waste an application. After listing the "for" evidence, actively ask: where does this org fall short of their typical grantees? What requirements might disqualify? What geography, population, or program type patterns work against the fit? If after thorough review there truly are none, state "none found after review" — do not omit the field.
-
-**§5 Process — invitation-only is a first-class fact.** Invitation-only changes the strategy from "apply" to "cultivate." Surface it prominently. The ED must leave with a concrete next action and a date. "Submit LOI by September 15" or "monitor site — no current open cycle, check back Q1 2027" are both acceptable. "TBD" is not.
-
-**§6 Style — drafting starts inside their constraints.** Page limits, required sections, attachment rules. If the org has applied before, note the prior submission as an in-house exemplar.
-
-**§7 Relationship history — from substrate, never invented.** Call get_org_memory with category="prior_grants" filtered by funder_name. Empty is a valid and honest answer.
-
-### Sourcing rules (verbatim from spec)
-- **Allowed:** funder's own site and published guidelines; 990/990-PF data (the shipped arsenal); org's OWN substrate for §6–7; reputable public coverage, clearly attributed
-- **[cited: source, date] on every factual claim.** A field that can't be sourced is [need: field] — never inferred.
-- **Verbatim for §2 and §5 process facts.** Summarizing is allowed *around* quotes, never *instead of* them.
-- **No fabricated grantees or amounts.** §3 comes from 990 data or is [need:].
-
-**Org voice takes precedence.** The profile is about the funder, not the org — but when you make framing recommendations in §4 fit signals (e.g. "our disability-specific program overlaps with their youth workforce focus"), ground those in the org's actual programs from \`programs\` and \`outcomes_data\`.
-`;
-
 export const VOICE_SKILLS: VoiceSkill[] = [
-  // ----- research-funder skill (development_director only — more specific than grant-narrative) -----
-  // Placed FIRST so it wins over grant-narrative for explicit funder-research messages.
-  {
-    id: "research-funder",
-    archetypes: new Set<ArchetypeSlug>(["development_director"]),
-    triggers: [
-      // Direct workflow names
-      /\bresearch.{0,10}funder\b/i,
-      /\bfunder\s+profile\b/i,
-      /\bbuild.{0,20}\bprofile\b.{0,30}\bfunder\b|\bfunder\b.{0,30}\bbuild.{0,20}\bprofile\b/i,
-      // Explicit research asks with funder context
-      /\bresearch\b.{0,30}\b(foundation|fund|trust|giving|philanthrop)/i,
-      /\b(look up|look into|research|investigate|check out)\b.{0,20}\b(funder|foundation|trust|fund)\b/i,
-      // Profile / prospect research
-      /\b(funder\s+(research|prospect)|prospect\s+research)\b/i,
-      // "tell me about [Funder]" / "what do you know about [Funder Foundation]"
-      /\b(tell me about|what do you know about|find out about|learn about)\b.{0,30}\b(foundation|fund|trust|giving|philanthrop)/i,
-    ],
-    addendum: RESEARCH_FUNDER_ADDENDUM,
-  },
   // ----- Grant section skills (development_director only) -----
   // PRECEDENCE NOTE: These three section skills are placed BEFORE grant-narrative in the array.
   // selectVoiceSkillAddendum uses first-match-wins (iterates and returns on first trigger hit).
