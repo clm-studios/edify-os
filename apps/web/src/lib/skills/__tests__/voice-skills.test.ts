@@ -3,7 +3,8 @@
  *
  * Covers:
  *  1. Trigger set: grant-narrative fires on on-intent messages and not on off-intent ones.
- *     Also verifies tightened triggers for "foundation" and "outcomes".
+ *     Also verifies tightened triggers for "foundation".
+ *     NOTE: "outcomes" and "logic model" triggers migrated to logic-model skill (PRD: grant-section-craft-layers).
  *  2. selectVoiceSkillAddendum returns a non-empty string (with a distinctive phrase)
  *     for an eligible archetype + on-intent message; empty string for off-intent.
  *  3. A non-eligible archetype with a grant-intent message still returns "".
@@ -11,6 +12,11 @@
  *  5. board-comms: fires for executive_assistant on board-intent messages.
  *  6. Sanity: multi-skill-word message returns exactly ONE addendum (first match wins);
  *     off-intent message returns "".
+ * 11. logic-model skill: trigger fires / silent for on-intent / off-intent messages.
+ * 12. evaluation-plan skill: trigger fires / silent for on-intent / off-intent messages.
+ * 13. budget-narrative skill: trigger fires / silent for on-intent / off-intent messages.
+ * 14. Migration regression: "logic model" and "outcomes" messages now select logic-model, NOT grant-narrative.
+ * 15. Precedence: mixed grant+section message selects section skill (more-specific-wins).
  */
 
 import { describe, it, expect } from "vitest";
@@ -87,30 +93,37 @@ describe("grant-narrative trigger set", () => {
     expect(matched).toBe(false);
   });
 
-  // --- Tightened "outcomes" trigger tests ---
+  // --- "outcomes" and "logic model" triggers MIGRATED to logic-model skill ---
+  // These triggers were removed from grant-narrative (PRD: grant-section-craft-layers).
+  // The migration regression tests in section 14 confirm the new skill now owns these phrases.
 
-  it("fires on 'report outcomes to the funder' (reporting context)", () => {
+  it("still fires on 'report outcomes to the funder' via the \\b(funder)\\b trigger (not the migrated outcomes regex)", () => {
+    // NOTE: "we need to report outcomes to the funder" contains "funder" which is a remaining
+    // grant-narrative trigger. The outcomes regex was migrated but grant-narrative still
+    // matches this via \b(funder|funders)\b. The migration regression tests (section 14)
+    // confirm that selectVoiceSkillAddendum picks logic-model first (not grant-narrative)
+    // for this message because logic-model also matches and is earlier in the array.
     expect(grantSkill).toBeDefined();
     const matched = grantSkill!.triggers.some((re) => re.test("we need to report outcomes to the funder"));
     expect(matched).toBe(true);
   });
 
-  it("fires on 'measure our program outcomes' (measurement context)", () => {
+  it("does NOT fire on 'measure our program outcomes' (trigger migrated to logic-model)", () => {
     expect(grantSkill).toBeDefined();
     const matched = grantSkill!.triggers.some((re) => re.test("how do we measure our program outcomes?"));
-    expect(matched).toBe(true);
+    expect(matched).toBe(false);
   });
 
-  it("fires on 'logic model and outcomes' (grant context)", () => {
+  it("does NOT fire on 'logic model and outcomes' (trigger migrated to logic-model)", () => {
     expect(grantSkill).toBeDefined();
     const matched = grantSkill!.triggers.some((re) => re.test("fill in the logic model and outcomes section"));
-    expect(matched).toBe(true);
+    expect(matched).toBe(false);
   });
 
-  it("fires on 'outcomes data for the report'", () => {
+  it("does NOT fire on 'outcomes data for the report' (trigger migrated to logic-model)", () => {
     expect(grantSkill).toBeDefined();
     const matched = grantSkill!.triggers.some((re) => re.test("pull together our outcomes data for the report"));
-    expect(matched).toBe(true);
+    expect(matched).toBe(false);
   });
 
   it("does NOT fire on 'outcome of the gala' (generic English use)", () => {
@@ -730,5 +743,421 @@ describe("selectVoiceSkillAddendum — volunteer-coordinator", () => {
   it("returns '' for hr_volunteer_coordinator on 'draft the ED report for the board'", () => {
     const result = selectVoiceSkillAddendum("hr_volunteer_coordinator", "draft the ED report for the board");
     expect(result).toBe("");
+  });
+});
+
+// -----------------------------------------------------------------------
+// 11. logic-model trigger set and selectVoiceSkillAddendum
+// -----------------------------------------------------------------------
+
+describe("logic-model trigger set", () => {
+  const logicModelSkill = VOICE_SKILLS.find((s) => s.id === "logic-model");
+
+  it("fires on 'build a logic model for our tutoring program'", () => {
+    expect(logicModelSkill).toBeDefined();
+    const matched = logicModelSkill!.triggers.some((re) =>
+      re.test("build a logic model for our tutoring program")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'fill in the logic model and outcomes section'", () => {
+    expect(logicModelSkill).toBeDefined();
+    const matched = logicModelSkill!.triggers.some((re) =>
+      re.test("fill in the logic model and outcomes section")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'draft the theory of change section'", () => {
+    expect(logicModelSkill).toBeDefined();
+    const matched = logicModelSkill!.triggers.some((re) =>
+      re.test("draft the theory of change section")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'describe the causal chain for our program'", () => {
+    expect(logicModelSkill).toBeDefined();
+    const matched = logicModelSkill!.triggers.some((re) =>
+      re.test("describe the causal chain for our program")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'how do we measure our program outcomes?' (migrated outcomes trigger)", () => {
+    expect(logicModelSkill).toBeDefined();
+    const matched = logicModelSkill!.triggers.some((re) =>
+      re.test("how do we measure our program outcomes?")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'we need to report outcomes to the funder' (migrated outcomes trigger)", () => {
+    expect(logicModelSkill).toBeDefined();
+    const matched = logicModelSkill!.triggers.some((re) =>
+      re.test("we need to report outcomes to the funder")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'pull together our outcomes data for the report' (migrated outcomes trigger)", () => {
+    expect(logicModelSkill).toBeDefined();
+    const matched = logicModelSkill!.triggers.some((re) =>
+      re.test("pull together our outcomes data for the report")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("does NOT fire on 'what's on my calendar today'", () => {
+    expect(logicModelSkill).toBeDefined();
+    const matched = logicModelSkill!.triggers.some((re) =>
+      re.test("what's on my calendar today")
+    );
+    expect(matched).toBe(false);
+  });
+
+  it("does NOT fire on 'outcome of the gala' (generic English use)", () => {
+    expect(logicModelSkill).toBeDefined();
+    const matched = logicModelSkill!.triggers.some((re) =>
+      re.test("what was the outcome of the gala?")
+    );
+    expect(matched).toBe(false);
+  });
+
+  it("does NOT fire on 'the final outcome' (generic English use)", () => {
+    expect(logicModelSkill).toBeDefined();
+    const matched = logicModelSkill!.triggers.some((re) =>
+      re.test("let's talk about the final outcome")
+    );
+    expect(matched).toBe(false);
+  });
+});
+
+describe("selectVoiceSkillAddendum — logic-model", () => {
+  const ON_INTENT_MSG = "build a logic model for our tutoring program";
+  const OFF_INTENT_MSG = "what's on my calendar";
+
+  it("returns a non-empty string for development_director + logic-model-intent message", () => {
+    const result = selectVoiceSkillAddendum("development_director", ON_INTENT_MSG);
+    expect(result).not.toBe("");
+  });
+
+  it("result contains the distinctive phrase 'Logic Model'", () => {
+    const result = selectVoiceSkillAddendum("development_director", ON_INTENT_MSG);
+    expect(result).toContain("Logic Model");
+  });
+
+  it("result contains 'Org voice takes precedence'", () => {
+    const result = selectVoiceSkillAddendum("development_director", ON_INTENT_MSG);
+    expect(result).toContain("Org voice takes precedence");
+  });
+
+  it("returns '' for development_director + off-intent message", () => {
+    const result = selectVoiceSkillAddendum("development_director", OFF_INTENT_MSG);
+    expect(result).toBe("");
+  });
+
+  it("returns '' for events_director + logic-model message (wrong archetype)", () => {
+    const result = selectVoiceSkillAddendum("events_director", ON_INTENT_MSG);
+    expect(result).toBe("");
+  });
+
+  it("returns '' for marketing_director + logic-model message (wrong archetype)", () => {
+    const result = selectVoiceSkillAddendum("marketing_director", ON_INTENT_MSG);
+    expect(result).toBe("");
+  });
+});
+
+// -----------------------------------------------------------------------
+// 12. evaluation-plan trigger set and selectVoiceSkillAddendum
+// -----------------------------------------------------------------------
+
+describe("evaluation-plan trigger set", () => {
+  const evalPlanSkill = VOICE_SKILLS.find((s) => s.id === "evaluation-plan");
+
+  it("fires on 'write the evaluation plan section'", () => {
+    expect(evalPlanSkill).toBeDefined();
+    const matched = evalPlanSkill!.triggers.some((re) =>
+      re.test("write the evaluation plan section")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'help me draft our evaluation section'", () => {
+    expect(evalPlanSkill).toBeDefined();
+    const matched = evalPlanSkill!.triggers.some((re) =>
+      re.test("help me draft our evaluation section")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'how will we measure success in this grant?'", () => {
+    expect(evalPlanSkill).toBeDefined();
+    const matched = evalPlanSkill!.triggers.some((re) =>
+      re.test("how will we measure success in this grant?")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'what indicators should we include in the proposal?'", () => {
+    expect(evalPlanSkill).toBeDefined();
+    const matched = evalPlanSkill!.triggers.some((re) =>
+      re.test("what indicators should we include in the proposal?")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'describe our data collection plan'", () => {
+    expect(evalPlanSkill).toBeDefined();
+    const matched = evalPlanSkill!.triggers.some((re) =>
+      re.test("describe our data collection plan")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'draft a measurement plan for the grant'", () => {
+    expect(evalPlanSkill).toBeDefined();
+    const matched = evalPlanSkill!.triggers.some((re) =>
+      re.test("draft a measurement plan for the grant")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("does NOT fire on 'what's on my calendar today'", () => {
+    expect(evalPlanSkill).toBeDefined();
+    const matched = evalPlanSkill!.triggers.some((re) =>
+      re.test("what's on my calendar today")
+    );
+    expect(matched).toBe(false);
+  });
+
+  it("does NOT fire on 'write a donor thank-you letter'", () => {
+    expect(evalPlanSkill).toBeDefined();
+    const matched = evalPlanSkill!.triggers.some((re) =>
+      re.test("write a donor thank-you letter")
+    );
+    expect(matched).toBe(false);
+  });
+});
+
+describe("selectVoiceSkillAddendum — evaluation-plan", () => {
+  const ON_INTENT_MSG = "write the evaluation plan section for our grant";
+  const OFF_INTENT_MSG = "what's on my calendar";
+
+  it("returns a non-empty string for development_director + evaluation-intent message", () => {
+    const result = selectVoiceSkillAddendum("development_director", ON_INTENT_MSG);
+    expect(result).not.toBe("");
+  });
+
+  it("result contains the distinctive phrase 'Evaluation Plan'", () => {
+    const result = selectVoiceSkillAddendum("development_director", ON_INTENT_MSG);
+    expect(result).toContain("Evaluation Plan");
+  });
+
+  it("result contains 'Org voice takes precedence'", () => {
+    const result = selectVoiceSkillAddendum("development_director", ON_INTENT_MSG);
+    expect(result).toContain("Org voice takes precedence");
+  });
+
+  it("returns '' for development_director + off-intent message", () => {
+    const result = selectVoiceSkillAddendum("development_director", OFF_INTENT_MSG);
+    expect(result).toBe("");
+  });
+
+  it("returns '' for marketing_director + evaluation-intent message (wrong archetype)", () => {
+    const result = selectVoiceSkillAddendum("marketing_director", ON_INTENT_MSG);
+    expect(result).toBe("");
+  });
+
+  it("returns '' for programs_director + evaluation-intent message (wrong archetype)", () => {
+    const result = selectVoiceSkillAddendum("programs_director", ON_INTENT_MSG);
+    expect(result).toBe("");
+  });
+});
+
+// -----------------------------------------------------------------------
+// 13. budget-narrative trigger set and selectVoiceSkillAddendum
+// -----------------------------------------------------------------------
+
+describe("budget-narrative trigger set", () => {
+  const budgetSkill = VOICE_SKILLS.find((s) => s.id === "budget-narrative");
+
+  it("fires on 'draft the budget narrative for this proposal'", () => {
+    expect(budgetSkill).toBeDefined();
+    const matched = budgetSkill!.triggers.some((re) =>
+      re.test("draft the budget narrative for this proposal")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'write a budget justification for the NIH grant'", () => {
+    expect(budgetSkill).toBeDefined();
+    const matched = budgetSkill!.triggers.some((re) =>
+      re.test("write a budget justification for the NIH grant")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'how do I explain each line item in the budget?'", () => {
+    expect(budgetSkill).toBeDefined();
+    const matched = budgetSkill!.triggers.some((re) =>
+      re.test("how do I explain each line item in the budget?")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'help me justify our personnel costs'", () => {
+    expect(budgetSkill).toBeDefined();
+    const matched = budgetSkill!.triggers.some((re) =>
+      re.test("help me justify our personnel costs")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'what indirect rate should we use in the proposal?'", () => {
+    expect(budgetSkill).toBeDefined();
+    const matched = budgetSkill!.triggers.some((re) =>
+      re.test("what indirect rate should we use in the proposal?")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("fires on 'calculate the cost per participant for this program'", () => {
+    expect(budgetSkill).toBeDefined();
+    const matched = budgetSkill!.triggers.some((re) =>
+      re.test("calculate the cost per participant for this program")
+    );
+    expect(matched).toBe(true);
+  });
+
+  it("does NOT fire on 'what's on my calendar today'", () => {
+    expect(budgetSkill).toBeDefined();
+    const matched = budgetSkill!.triggers.some((re) =>
+      re.test("what's on my calendar today")
+    );
+    expect(matched).toBe(false);
+  });
+
+  it("does NOT fire on 'draft a board memo on the budget shortfall' (board context, not budget narrative)", () => {
+    expect(budgetSkill).toBeDefined();
+    const matched = budgetSkill!.triggers.some((re) =>
+      re.test("draft a board memo on the budget shortfall")
+    );
+    expect(matched).toBe(false);
+  });
+});
+
+describe("selectVoiceSkillAddendum — budget-narrative", () => {
+  const ON_INTENT_MSG = "draft the budget narrative for our grant proposal";
+  const OFF_INTENT_MSG = "what's on my calendar";
+
+  it("returns a non-empty string for development_director + budget-narrative-intent message", () => {
+    const result = selectVoiceSkillAddendum("development_director", ON_INTENT_MSG);
+    expect(result).not.toBe("");
+  });
+
+  it("result contains the distinctive phrase 'Budget Narrative'", () => {
+    const result = selectVoiceSkillAddendum("development_director", ON_INTENT_MSG);
+    expect(result).toContain("Budget Narrative");
+  });
+
+  it("result contains 'Org voice takes precedence'", () => {
+    const result = selectVoiceSkillAddendum("development_director", ON_INTENT_MSG);
+    expect(result).toContain("Org voice takes precedence");
+  });
+
+  it("returns '' for development_director + off-intent message", () => {
+    const result = selectVoiceSkillAddendum("development_director", OFF_INTENT_MSG);
+    expect(result).toBe("");
+  });
+
+  it("returns '' for marketing_director + budget-narrative message (wrong archetype)", () => {
+    const result = selectVoiceSkillAddendum("marketing_director", ON_INTENT_MSG);
+    expect(result).toBe("");
+  });
+
+  it("returns '' for executive_assistant + budget-narrative message (wrong archetype)", () => {
+    const result = selectVoiceSkillAddendum("executive_assistant", ON_INTENT_MSG);
+    expect(result).toBe("");
+  });
+});
+
+// -----------------------------------------------------------------------
+// 14. Migration regression: migrated triggers now select logic-model, NOT grant-narrative
+// -----------------------------------------------------------------------
+
+describe("migration regression — logic model + outcomes triggers", () => {
+  it("'build a logic model for our tutoring program' selects logic-model, not grant-narrative", () => {
+    const result = selectVoiceSkillAddendum("development_director", "build a logic model for our tutoring program");
+    expect(result).toContain("Logic Model");
+    expect(result).not.toContain("Grant Narrative");
+  });
+
+  it("'fill in the logic model and outcomes section' selects logic-model, not grant-narrative", () => {
+    const result = selectVoiceSkillAddendum("development_director", "fill in the logic model and outcomes section");
+    expect(result).toContain("Logic Model");
+    expect(result).not.toContain("Grant Narrative");
+  });
+
+  it("'we need to report outcomes to the funder' selects logic-model, not grant-narrative", () => {
+    const result = selectVoiceSkillAddendum("development_director", "we need to report outcomes to the funder");
+    expect(result).toContain("Logic Model");
+    expect(result).not.toContain("Grant Narrative");
+  });
+
+  it("'how do we measure our program outcomes?' selects logic-model, not grant-narrative", () => {
+    const result = selectVoiceSkillAddendum("development_director", "how do we measure our program outcomes?");
+    expect(result).toContain("Logic Model");
+    expect(result).not.toContain("Grant Narrative");
+  });
+
+  it("'pull together our outcomes data for the report' selects logic-model, not grant-narrative", () => {
+    const result = selectVoiceSkillAddendum("development_director", "pull together our outcomes data for the report");
+    expect(result).toContain("Logic Model");
+    expect(result).not.toContain("Grant Narrative");
+  });
+
+  it("grant-narrative still fires for non-migrated triggers like 'grant proposal'", () => {
+    const result = selectVoiceSkillAddendum("development_director", "help me write the grant proposal");
+    expect(result).toContain("Grant Narrative");
+    expect(result).not.toContain("Logic Model");
+  });
+
+  it("grant-narrative still fires for 'need statement'", () => {
+    const result = selectVoiceSkillAddendum("development_director", "draft our need statement for the funder");
+    expect(result).toContain("Grant Narrative");
+  });
+});
+
+// -----------------------------------------------------------------------
+// 15. Precedence: mixed grant+section message selects the section skill (more-specific-wins)
+// -----------------------------------------------------------------------
+
+describe("precedence — section skills win over grant-narrative for mixed messages", () => {
+  it("'build a logic model for our grant proposal' selects logic-model (section wins)", () => {
+    // Message contains both "logic model" (logic-model trigger) and "grant proposal" (grant-narrative trigger).
+    // logic-model is earlier in the VOICE_SKILLS array — section-specific skill wins.
+    const result = selectVoiceSkillAddendum("development_director", "build a logic model for our grant proposal");
+    expect(result).toContain("Logic Model");
+    expect(result).not.toContain("Grant Narrative");
+  });
+
+  it("'write the evaluation plan for our grant proposal' selects evaluation-plan (section wins)", () => {
+    const result = selectVoiceSkillAddendum("development_director", "write the evaluation plan for our grant proposal");
+    expect(result).toContain("Evaluation Plan");
+    expect(result).not.toContain("Grant Narrative");
+  });
+
+  it("'draft the budget narrative for our grant proposal' selects budget-narrative (section wins)", () => {
+    const result = selectVoiceSkillAddendum("development_director", "draft the budget narrative for our grant proposal");
+    expect(result).toContain("Budget Narrative");
+    expect(result).not.toContain("Grant Narrative");
+  });
+
+  it("a pure grant message with no section phrase still selects grant-narrative", () => {
+    // No section-specific trigger words present.
+    const result = selectVoiceSkillAddendum("development_director", "help me write a compelling need statement for the Hartwell Foundation");
+    expect(result).toContain("Grant Narrative");
   });
 });

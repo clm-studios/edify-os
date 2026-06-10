@@ -2072,4 +2072,48 @@ The `isTransient()` AbortError guard (PR #31 semantics) auto-merged correctly �
 
 **Verification:** `pnpm --filter web typecheck` — passes.
 
+---
+
+## Session: grant-section-craft-layers — wire evaluation-plan / logic-model / budget-narrative into chat addendum
+
+**Identity:** Coding agent (Sonnet, spawned by Lopmon)
+**Branch:** `lopmon/grant-section-craft-layers`
+**Worktree:** `C:\Users\Araly\edify-os\UsersAralyedify-worktreesgrant-section-craft-layers`
+**Base:** `origin/main` @ `aa5c883`
+**Date:** 2026-06-10
+**PRD:** `C:\Users\Araly\life\projects\edify-os\prd-grant-section-craft-layers.md` (Approved Minervamon 2026-06-10)
+
+### What was done
+
+1. **Added three addendum constants** to `apps/web/src/lib/skills/registry.ts`:
+   - `LOGIC_MODEL_ADDENDUM` — verbatim body from `grant-section-skills/logic-model.md`
+   - `EVALUATION_PLAN_ADDENDUM` — verbatim body from `grant-section-skills/evaluation-plan.md`
+   - `BUDGET_NARRATIVE_ADDENDUM` — verbatim body from `grant-section-skills/budget-narrative.md`
+
+2. **Added three VOICE_SKILLS entries** (all `archetypes: development_director`), placed **before** `grant-narrative` in the array:
+   - `logic-model`: triggers: `\blogic model\b`, `\btheory of change\b`, inputs/outputs/outcomes chain regex, `\bcausal chain\b`/`\bpathway to impact\b`, plus the migrated outcomes regex.
+   - `evaluation-plan`: triggers: `\bevaluation plan\b`, `\bevaluation section\b`, how-we-measure regex, `\b(outcome\s+)?indicators?\b`, `\bdata collection\b`, `\bmeasurement plan\b`.
+   - `budget-narrative`: triggers: `\bbudget narrative\b`, `\bbudget justification\b`, `\bline[- ]items?\b`, `\bpersonnel costs?\b`, `\bindirect (rate|costs?)\b`, `\bcost per (participant|...)\b`.
+
+3. **Trigger migration** from `grant-narrative`:
+   - REMOVED: `/\blogic model\b/i` (line 663 in original)
+   - REMOVED: tightened outcomes regex (line 668 in original)
+   - Both now live in `logic-model` skill.
+   - Added migration comment in grant-narrative triggers for traceability.
+
+4. **Precedence mechanism**: `selectVoiceSkillAddendum` uses first-match-wins (iterates `VOICE_SKILLS`, returns on first trigger hit). Section skills are placed before `grant-narrative` in the array — section-specific wins for mixed messages. Documented with a code comment in the VOICE_SKILLS array.
+
+5. **Tests** added to `apps/web/src/lib/skills/__tests__/voice-skills.test.ts`:
+   - Section 11: logic-model trigger fires/silent (10 tests)
+   - Section 12: evaluation-plan trigger fires/silent (8 tests)
+   - Section 13: budget-narrative trigger fires/silent (8 tests)
+   - Section 14: migration regression — 5 "now selects logic-model" + 2 "grant-narrative still fires for non-migrated" (7 tests)
+   - Section 15: precedence — 3 mixed-signal tests + 1 pure-grant fallback (4 tests)
+   - Updated 4 existing grant-narrative tests that expected the migrated triggers to still live there.
+
+### Verification
+
+- `pnpm --filter web typecheck` — passes (no errors)
+- `pnpm --filter web test` — 151 tests, all pass (up from 96 in original file)
+
 **PR:** Opened against `main`. Do not merge — Lopmon handles merges.
