@@ -76,6 +76,11 @@ import {
 } from "@/lib/tools/grant-writing-handlers";
 import { mailchimpTools, executeMailchimpTool, MAILCHIMP_TOOLS_ADDENDUM } from "@/lib/tools/mailchimp";
 import { eventbriteTools, executeEventbriteTool, EVENTBRITE_TOOLS_ADDENDUM } from "@/lib/tools/eventbrite";
+import {
+  funderProfileTools,
+  executeFunderProfileTool,
+  FUNDER_PROFILE_TOOLS_ADDENDUM,
+} from "@/lib/tools/funder-profile";
 import { getValidGoogleAccessToken, type GoogleIntegrationType } from "@/lib/google";
 import { ARCHETYPE_SLUGS, type ArchetypeSlug } from "@/lib/archetypes";
 
@@ -104,6 +109,7 @@ export {
   GRANT_WRITING_TOOLS_ADDENDUM,
   MAILCHIMP_TOOLS_ADDENDUM,
   EVENTBRITE_TOOLS_ADDENDUM,
+  FUNDER_PROFILE_TOOLS_ADDENDUM,
 };
 export type { RenderToolGeneratedFile };
 
@@ -131,6 +137,8 @@ const SEARCH_GRANTS_TOOL_NAMES = new Set(
 );
 // grant_writing tools have prefix "draft" / "revise" — pin via name set.
 const GRANT_WRITING_TOOL_NAMES = new Set(grantWritingTools.map((t) => t.name));
+// funder_profile tool — pinned by name set (dev-director only).
+const FUNDER_PROFILE_TOOL_NAMES = new Set(funderProfileTools.map((t) => t.name));
 
 // ---------------------------------------------------------------------------
 // System-prompt addendum helpers
@@ -210,6 +218,10 @@ export function getToolFamilies(tools: Anthropic.Tool[]): Set<string> {
       families.add("grant_writing");
       continue;
     }
+    if (FUNDER_PROFILE_TOOL_NAMES.has(t.name)) {
+      families.add("funder_profile");
+      continue;
+    }
     const prefix = t.name.split("_")[0];
     if (prefix) families.add(prefix);
   }
@@ -245,6 +257,7 @@ export function buildSystemAddendums(tools: Anthropic.Tool[]): string {
   if (families.has("grant_writing")) parts.push(GRANT_WRITING_TOOLS_ADDENDUM);
   if (families.has("mailchimp")) parts.push(MAILCHIMP_TOOLS_ADDENDUM);
   if (families.has("eventbrite")) parts.push(EVENTBRITE_TOOLS_ADDENDUM);
+  if (families.has("funder_profile")) parts.push(FUNDER_PROFILE_TOOLS_ADDENDUM);
   return parts.join("");
 }
 
@@ -256,7 +269,7 @@ export function buildSystemAddendums(tools: Anthropic.Tool[]): string {
 export const ARCHETYPE_TOOLS: Record<ArchetypeSlug, Anthropic.Tool[]> = {
   executive_assistant: [...calendarTools, ...gmailTools, ...driveTools, ...memoryTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
   events_director: [...calendarTools, ...driveTools, ...unsplashTools, ...eventbriteTools, ...memoryTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
-  development_director: [...calendarTools, ...searchGrantsTools, ...crmTools, ...gmailTools, ...driveTools, ...memoryTools, ...orgMemoryTools, ...grantWritingTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
+  development_director: [...calendarTools, ...searchGrantsTools, ...crmTools, ...gmailTools, ...driveTools, ...memoryTools, ...orgMemoryTools, ...grantWritingTools, ...funderProfileTools, ...reportEventTools, ...impactDataReadTools, ...consultTeammateTools],
   marketing_director: [
     ...mailchimpTools,
     ...driveTools,
@@ -533,6 +546,10 @@ export async function executeTool({
     if (name === "revise_grant_content") {
       return executeReviseGrantContent({ input, serviceClient, anthropic });
     }
+  }
+
+  if (FUNDER_PROFILE_TOOL_NAMES.has(name)) {
+    return executeFunderProfileTool({ name, input, orgId, serviceClient });
   }
 
   return { content: `Unknown tool: ${name}`, is_error: true };

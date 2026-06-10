@@ -2117,3 +2117,134 @@ The `isTransient()` AbortError guard (PR #31 semantics) auto-merged correctly �
 - `pnpm --filter web test` — 151 tests, all pass (up from 96 in original file)
 
 **PR:** Opened against `main`. Do not merge — Lopmon handles merges.
+
+---
+
+## Session: PR-A — save_funder_profile write gate + research workflow
+
+**Identity:** Coding agent (Sonnet claude-sonnet-4-6, spawned by Lopmon)
+**Branch:** `lopmon/funder-profile-write`
+**Worktree:** `C:\Users\Araly\edify-worktrees\funder-profile-write`
+**Base:** `origin/main` @ `951301e`
+**Date:** 2026-06-10
+**PRD:** `~/life/projects/edify-os/prd-funder-profile-engineering.md` (Approved)
+**Content spec:** `~/life/projects/edify-os/funder-profile-content-spec-2026-06-03.md`
+**Scope:** PR-A (write side only) per PRD §5
+
+---
+
+### Files Created
+
+- `apps/web/src/lib/tools/funder-profile.ts` — NEW. Tool definition + save handler + write-time validation + refresh semantics.
+- `apps/web/src/lib/tools/__tests__/funder-profile.test.ts` — NEW. 49 tests covering all 6 quality-bar clauses, refresh semantics, error visibility, voice skill registration, and registry gating.
+
+### Files Modified
+
+- `apps/web/src/lib/tools/registry.ts` — Added funder-profile import/export, FUNDER_PROFILE_TOOL_NAMES set, getToolFamilies branch, buildSystemAddendums entry, development_director tool set entry, executeTool dispatcher branch.
+- `apps/web/src/lib/skills/registry.ts` — Added research-funder voice skill (RESEARCH_FUNDER_ADDENDUM + triggers) at the top of VOICE_SKILLS array (before grant-narrative, more-specific wins).
+
+---
+
+### What was built
+
+**Tool: save_funder_profile** (development_director only)
+- Accepts 8 spec fields + structured metadata per PRD §4 and the content spec.
+- Storage: `memory_entries` category `funder_profile`, data JSONB with funder_name, aliases, ein, funder_type, built_on, refreshed_on, and per-field retrieved_dates.
+- Registered for development_director ONLY in registry.ts ARCHETYPE_TOOLS.
+
+**Write-time validation (6 clauses):**
+1. V1: Every populated field must have source + retrieved_date — checked on all 6 spec sections
+2. V2: §2 priorities must have ≥2 verbatim quoted phrases, each with source + retrieved_date
+3. V3: §3 giving_profile.median_grant must be non-blank (real figure or [need:] placeholder)
+4. V4: §4 fit_signals.counter_signals must be non-empty (or ["none found after review"])
+5. V5: §5 process_and_calendar must have next_action + next_action_date (not blank, not TBD/N/A)
+6. V6: Zero malformed [cited:] tags (each [cited:] must have source, comma, year)
+- All errors are instructive strings written as instructions to the model, not bare field names.
+- Rejection returns is_error: true with numbered list + "Address each issue and call save_funder_profile again."
+
+**Refresh semantics (handler-enforced):**
+- Existing profile detected by data->>'funder_name' case-insensitive match (reuses existing funderName filter idiom from get-by-category.ts).
+- §2 priorities: replaced (volatile field)
+- §5 process_and_calendar: replaced (volatile field)
+- §7 relationship_history: APPENDED — new entries appended to existing list, never overwritten
+- built_on: preserved from original entry
+- refreshed_on: bumped to today
+
+**Prompt addendum: FUNDER_PROFILE_TOOLS_ADDENDUM**
+- Located in funder-profile.ts, exported and wired into registry.ts buildSystemAddendums under the "funder_profile" family.
+- Contains: allowed sources, per-field guidance (what to gather), citation discipline verbatim from spec, [need:] over inference, no fabricated grantees, budget web_search across turns.
+
+**Voice skill: research-funder**
+- Located in apps/web/src/lib/skills/registry.ts, placed FIRST in VOICE_SKILLS array (before logic-model/evaluation-plan/budget-narrative/grant-narrative).
+- Archetypes: development_director only.
+- Triggers: "research funder", "funder profile", "build...profile...funder", "research...foundation/fund/trust", "tell me about...foundation", and similar explicit research-intent phrases.
+- Addendum: RESEARCH_FUNDER_ADDENDUM — verbatim spec sourcing rules, per-field top-tier criteria, citation discipline, [need:] discipline, no fabrication.
+
+---
+
+### Test counts
+
+- `apps/web/src/lib/tools/__tests__/funder-profile.test.ts`: 49 tests
+  - V1 (field source+date): 5 tests
+  - V2 (§2 verbatim phrases): 5 tests
+  - V3 (§3 median/range): 3 tests
+  - V4 (§4 counter-signals): 4 tests
+  - V5 (§5 next action + date): 5 tests
+  - V6 (malformed [cited:] tags): 4 tests
+  - E1/E2 (error visibility): 3 tests
+  - Refresh semantics (R7 append, Rb built_on, Rr refreshed_on, R2/R5 replace, new profile, R7 preserve): 6 tests
+  - research-funder voice skill: 6 tests
+  - Registry gating (dev-director only): 6 tests
+- `apps/web/src/lib/skills/__tests__/voice-skills.test.ts`: 151 tests (pre-existing, untouched)
+- Total: 200 tests, all pass
+
+### Verification
+
+- `pnpm --filter web typecheck` — passes (0 errors)
+- `pnpm --filter web test` — 200 tests, all pass
+
+### Hard scope limits respected
+
+- NO changes to draft_grant_content / grant-writing-handlers.ts (PR-B scope)
+- NO UI changes
+- NO migrations
+- NO new data sources
+- NO changes to websearch.ts max_uses (still 5/turn)
+- PR NOT merged — awaiting Minervamon review
+
+
+---
+
+## 2026-06-10 — PR #35 descope: remove out-of-scope research-funder voice skill
+
+**Agent:** Coding agent (Sonnet, spawned by Lopmon)
+**Worktree:** `C:\Users\Araly\edify-worktrees\pr35-descope` (mapped to `C:\Users\Araly\edify-os\UsersAralyedify-worktreespr35-descope`)
+**Branch:** `pr35-descope-tmp` → pushed to `origin/lopmon/funder-profile-write`
+
+### What was removed
+
+- `RESEARCH_FUNDER_ADDENDUM` constant + `research-funder` registry entry (first item in `VOICE_SKILLS`) from `apps/web/src/lib/skills/registry.ts` — reverted to `origin/main` state entirely (PR #35 should not touch that file at all).
+- 7 voice-skill tests from `apps/web/src/lib/tools/__tests__/funder-profile.test.ts`: the `describe("research-funder voice skill — registry", ...)` block (exercises VOICE_SKILLS + selectVoiceSkillAddendum).
+
+### What was kept
+
+- `FUNDER_PROFILE_TOOLS_ADDENDUM` in `apps/web/src/lib/tools/funder-profile.ts` — tool-side workflow choreography (research_funder workflow, sourcing rules, field-by-field guidance). This is in-scope per the PRD.
+- `buildSystemAddendums` wiring in `apps/web/src/lib/tools/registry.ts` — unchanged.
+- All 42 remaining tests in `funder-profile.test.ts`: V1–V6 validation, refresh semantics, error visibility, and registry-gating tests.
+
+### Provenance discipline
+
+Voice-skill craft content at CLM is authored by Minervamon. The RESEARCH_FUNDER_ADDENDUM was agent-composed (not sourced from Minervamon's verbatim files) and cannot ship. The tool-side addendum (FUNDER_PROFILE_TOOLS_ADDENDUM) is workflow choreography authored as part of this agent's task and is in scope.
+
+### Gap assessment (step 5)
+
+No sourcing-discipline gap found. FUNDER_PROFILE_TOOLS_ADDENDUM already covers citation discipline ([cited: source, date]), [need:] discipline, verbatim-phrases rule for §2, no-fabricated-grantees rule for §3, counter-signals requirement for §4, and concrete next-action rule for §5. The craft-layer content that existed only in the voice skill was presentation/emphasis narrative, not structurally unique sourcing rules.
+
+### Results
+
+- `apps/web/src/lib/skills/registry.ts`: matches `origin/main` exactly (diff: empty)
+- Tests removed: 7 (voice-skill registration + trigger tests)
+- Tests kept: 42 (validation V1–V6, refresh, error visibility, registry gating)
+- voice-skills.test.ts: 151 tests, all passing, untouched
+- Total passing: 193 (151 + 42)
+- Typecheck: 0 errors
