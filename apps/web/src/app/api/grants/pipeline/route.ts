@@ -7,14 +7,15 @@
  * bypasses RLS for server-side writes; auth context validates the caller.
  *
  * M5 FIX (2026-06-10): GET now accepts limit/offset query params with
- * bounds-checking and a default limit of 200.  The previous select("*") with
- * no limit returned the full table for the org on every page load, which
- * would degrade without bound as pipelines grow.
+ * bounds-checking and a default limit of 1000 (= max).  The previous
+ * select("*") with no limit returned the full table for the org on every page
+ * load, which would degrade without bound as pipelines grow.
  *
  * Consumer note: the /dashboard/grants page fetches without explicit
- * limit/offset and does client-side tab filtering.  The 200-row default is
- * high enough to be invisible at current scale; if an org exceeds 200 rows
- * the page will silently show only the first 200 (ordered by updated_at DESC).
+ * limit/offset and does client-side tab filtering — it is NOT pagination-aware.
+ * The default is temporarily set equal to the max (1000) so the non-paginated
+ * consumer never silently truncates.  Once the dashboard reads meta.total and
+ * paginates, the default can drop back to 200.
  * A meta.total field is included in the response so callers can detect
  * truncation and paginate if needed — it is additive and backward-compatible.
  */
@@ -85,7 +86,9 @@ const VALID_STATUSES: PipelineStatus[] = [
 //   destructure { data } continue to work unchanged.
 // ---------------------------------------------------------------------------
 
-const GET_DEFAULT_LIMIT = 200;
+// Default temporarily equals max: dashboard consumer is not pagination-aware.
+// Drop back to 200 once /dashboard/grants reads meta.total and paginates.
+const GET_DEFAULT_LIMIT = 1000;
 const GET_MAX_LIMIT = 1000;
 
 export async function GET(req: NextRequest) {

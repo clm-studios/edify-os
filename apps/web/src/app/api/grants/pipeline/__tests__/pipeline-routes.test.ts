@@ -26,7 +26,7 @@
  *
  * M5 — GET pagination
  * ---------------------------------------------------------------------------
- *   P1. Default limit (200) is applied when no limit param.
+ *   P1. Default limit (1000) is applied when no limit param.
  *   P2. Custom limit respected.
  *   P3. limit clamped to 1000 max.
  *   P4. offset param forwarded to range().
@@ -402,7 +402,7 @@ describe("M5 — GET /api/grants/pipeline pagination", () => {
     GET = mod.GET;
   });
 
-  it("P1 — default limit 200 applied when no limit param", async () => {
+  it("P1 — default limit 1000 applied when no limit param (reviewer: default=max until dashboard paginates)", async () => {
     const rows = Array.from({ length: 10 }, (_, i) => makeRow({ id: `g-${i}` }));
     selectReturnValue = { data: rows, error: null, count: 10 };
 
@@ -410,9 +410,11 @@ describe("M5 — GET /api/grants/pipeline pagination", () => {
     const res = await GET(req);
     expect(res.status).toBe(200);
 
-    // range(0, 199) should be called — 0-based, so offset=0, offset+limit-1=199
+    // range(0, 999) should be called — 0-based, so offset=0, offset+limit-1=999
+    // Default temporarily equals max so the non-paginated dashboard consumer
+    // never silently truncates; drop to 200 once it reads meta.total.
     const rangeMock = mockClient._queryChain.range;
-    expect(rangeMock).toHaveBeenCalledWith(0, 199);
+    expect(rangeMock).toHaveBeenCalledWith(0, 999);
   });
 
   it("P2 — custom limit respected", async () => {

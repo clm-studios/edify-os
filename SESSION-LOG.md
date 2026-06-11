@@ -2458,3 +2458,26 @@ Rationale for RPC over optimistic-concurrency: the RPC eliminates the race entir
 
 Opened as PR-B (DO NOT MERGE — awaiting Minervamon review).
 Sibling PRs: M1/M2 (grant-writing-handlers), M4 (GrantDetailDrawer) — no file overlap.
+
+---
+
+# SESSION-LOG — PR #39 M5 default-limit bump (reviewer request)
+
+**Identity:** Coding agent (Sonnet, spawned by Lopmon)
+**Branch:** `lopmon/m3-m5-pipeline-integrity` (worktree: pr39-bump-tmp)
+**Date:** 2026-06-10
+**Task:** Reviewer-requested change: raise M5 GET default limit from 200 → 1000 (= max) before merge.
+
+## Change
+
+- `apps/web/src/app/api/grants/pipeline/route.ts` — `GET_DEFAULT_LIMIT` changed from 200 → 1000. Added two-line comment above the constant recording the reviewer rationale: default temporarily equals max because the dashboard consumer (`apps/web/src/app/dashboard/grants/page.tsx`) is not pagination-aware; it fetches all rows and filters client-side, so a 200 default would silently truncate orgs with >200 pipeline rows. The default drops back to 200 once the dashboard reads `meta.total` and paginates. Updated the file-level consumer note and the inline query-param comment to match.
+- `apps/web/src/app/api/grants/pipeline/__tests__/pipeline-routes.test.ts` — Updated P1 test: description updated ("200" → "1000"), `range` assertion updated from `(0, 199)` to `(0, 999)`, added inline comment with the reviewer rationale.
+
+## Verification
+
+- `pnpm --filter web typecheck` — clean
+- `pnpm --filter web test` — 242/242 passed (4 test files)
+
+## Commit
+
+SHA to be filled after push.
