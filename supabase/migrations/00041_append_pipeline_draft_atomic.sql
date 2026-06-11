@@ -11,7 +11,7 @@
 --
 -- Manual apply: run this file in the Supabase SQL Editor (Citlali / Minervamon).
 -- Same workflow as 00033/00036/00037/00038/00040.
--- DO NOT apply in prod until lopmon/m3-m5-pipeline-integrity is merged to main.
+-- APPLY THIS IN PROD BEFORE merging lopmon/m3-m5-pipeline-integrity: the function is additive and inert until the calling code deploys, so apply-first has no failure window; merge-first would 500 every draft-append until applied.
 
 -- ---------------------------------------------------------------------------
 -- append_pipeline_draft — atomic jsonb append + optional status advance
