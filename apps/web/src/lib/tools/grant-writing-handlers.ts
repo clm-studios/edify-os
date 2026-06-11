@@ -15,7 +15,7 @@
  *
  * Cite-or-reject: every draft is parsed for un-cited numbers and quoted
  * strings. Up to 2 retries with an addendum citing the violation. After
- * retry 3, un-cited claims surface with [?] + "(missing citation)".
+ * the 3rd attempt (initial + 2 retries), un-cited claims surface with [?] + "(missing citation)".
  *
  * Model routing: Sonnet for all MVP content types. Haiku routing per
  * content_type is v2 perf work (deferred per PRD phasing).
@@ -245,9 +245,9 @@ function detectUncitedClaims(draft: string): string[] {
     const window = draft.slice(Math.max(0, pos - 80), pos + 80);
     const hasCitation = CITATION_RE.test(window);
     if (!hasCitation) {
-      // Exclude years (4-digit starting 19xx or 20xx) from the check
+      // Exclude years (4-digit number in range 1900–2099) from the check
       const num = match[0].replace(/[,%]/g, "");
-      if (num.length === 4 && (num.startsWith("19") || num.startsWith("20"))) continue;
+      if (/^(19|20)\d{2}$/.test(num)) continue;
       issues.push(`Number "${match[0]}" at position ${pos} appears uncited`);
     }
   }
@@ -272,9 +272,9 @@ function detectUncitedClaims(draft: string): string[] {
 function annotateMissingCitations(draft: string): string {
   // First pass: annotate uncited numbers
   let result = draft.replace(/\b(\d{2,}(?:[,]\d{3})*(?:\.\d+)?%?)\b/g, (match, num, offset) => {
-    // Skip years
+    // Skip years (4-digit number in range 1900–2099)
     const clean = num.replace(/[,%]/g, "");
-    if (clean.length === 4 && (clean.startsWith("19") || clean.startsWith("20"))) return match;
+    if (/^(19|20)\d{2}$/.test(clean)) return match;
     const window = draft.slice(Math.max(0, offset - 80), offset + 80);
     const hasCitation = CITATION_RE.test(window);
     if (!hasCitation) return `${match} [?] _(missing citation)_`;

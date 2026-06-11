@@ -2926,6 +2926,33 @@ SESSION-LOG.md merge=union
 
 ---
 
+## 2026-06-10 — chore(grant-writing): minors #2/#3/#8/#9/#10 — doc + year-check cleanups (PR-α)
+
+**Identity:** Coding agent (Sonnet, spawned by Lopmon)
+**Branch:** `lopmon/minors-grant-writing`
+**Worktree:** `C:\Users\Araly\edify-os\UsersAralyedify-worktreesminors-alpha`
+**Base:** `origin/main` @ `2dc133c`
+**Date:** 2026-06-10
+**Task:** PR-α of the 10-minors batch — five trivial doc/logic cleanups in grant-writing.ts, grant-writing-handlers.ts, and 00040 migration (comment only).
+
+### Changes
+
+| Fix | File | Change |
+|---|---|---|
+| #2 — Addendum wording | `grant-writing.ts:28` | Removed "Always call get_org_memory first…" instruction (redundant — `executeDraftGrantContent` calls `buildSubstrate` internally); replaced with "The proof library…is loaded automatically" + retained cite-or-reject framing. |
+| #3 — `required: []` comment | `grant-writing.ts:190` | Added inline comment explaining the intentional empty `required` array: draft_id/draft_text duality validated at handler level. |
+| #9 — Header comment | `grant-writing-handlers.ts:18` | Clarified "After retry 3" → "After the 3rd attempt (initial + 2 retries)" to match MAX_RETRIES = 2 constant. No behavior change. |
+| #10 — Year-exclusion checks | `grant-writing-handlers.ts:250,277` | Replaced `num.length === 4 && (num.startsWith("19") \|\| num.startsWith("20"))` with `/^(19\|20)\d{2}$/.test(num)` regex in both `detectUncitedClaims` and `annotateMissingCitations`. Same behavior; intent explicit. |
+| #8 — Migration comment | `00040_grants_pipeline.sql:48` | Added `-- ON DELETE CASCADE: deleting an org wipes…` comment above the FK line. Repo-documentation only — no SQL statement altered. |
+
+### Verification
+
+- `pnpm --filter web typecheck` — PASS (clean, 0 errors)
+- `pnpm --filter web test` — PASS (258/258 tests, all green)
+
+### Status
+
+COMPLETE — PR open, DO NOT MERGE — awaiting Minervamon review.
 # SESSION-LOG — PR-γ minors batch: pipeline route range validation (#6/#7)
 
 **Identity:** Coding agent (Sonnet, spawned by Lopmon)

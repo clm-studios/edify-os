@@ -45,6 +45,7 @@ ALTER TABLE public.memory_entries ADD CONSTRAINT memory_entries_category_check
 
 CREATE TABLE public.grants_pipeline (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- ON DELETE CASCADE: deleting an org wipes its entire grants pipeline incl. all draft history. Intentional (clean data hygiene), but unrecoverable — noted per review.
   org_id uuid NOT NULL REFERENCES public.orgs(id) ON DELETE CASCADE,
 
   -- Source-system identity
