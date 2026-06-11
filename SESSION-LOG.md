@@ -2390,6 +2390,100 @@ References PRs #35 and #36.
 
 ---
 
+## Session: M3 + M5 Pipeline Integrity fixes (PR-B of M1–M5 batch)
+
+**Identity:** Coding agent (Sonnet, spawned by Lopmon)
+**Branch:** `lopmon/m3-m5-pipeline-integrity`
+**Worktree:** `C:\Users\Araly\edify-os\UsersAralyedify-worktreesm3-m5-pipeline`
+**Base:** `origin/main` @ `02273a6`
+**Date:** 2026-06-10
+
+### Task
+
+Fix two pipeline route bugs scoped from the reviewer batch (2026-05-28):
+- M3 (HIGHEST IMPACT — silent data loss): atomic draft append
+- M5: GET unbounded result set
+
+### M3 — Silent Data Loss: Race on drafts jsonb Array
+
+**Root cause:** `PATCH /api/grants/pipeline/[id]` used a read-modify-write pattern for draft appends: SELECT drafts → JS append → UPDATE whole array. Two concurrent PATCHes reading the same array caused the second write to silently drop the first draft AND produce duplicate version numbers, violating the append-only contract declared in the file header.
+
+**Mechanism chosen: Postgres-side RPC (option a)**
+
+Created `append_pipeline_draft` SQL function (migration `00041_append_pipeline_draft_atomic.sql`) that:
+1. Acquires a `FOR UPDATE` row lock on the target row
+2. Reads `jsonb_array_length(drafts)` from live DB state to compute the next version number
+3. Appends the new draft object in a single `UPDATE ... SET drafts = drafts || jsonb_build_array(...)` statement
+4. Handles auto-advance to 'drafting' status in the same statement (preserves the side-effect from the previous implementation)
+5. Returns the full updated row as `SETOF grants_pipeline`
+
+Rationale for RPC over optimistic-concurrency: the RPC eliminates the race entirely (no window between read and write) rather than detecting and retrying after a conflict. It's the cleanest solution for an append-only log where conflicts are expected under concurrent tool calls.
+
+**Route changes (`apps/web/src/app/api/grants/pipeline/[id]/route.ts`):**
+- Draft path now calls `serviceClient.rpc('append_pipeline_draft', {...})` instead of SELECT + JS append + UPDATE
+- Non-draft path (status/notes/org_fit_score) unchanged — scalar fields, last-write-wins acceptable
+- Auto-advance side effect preserved: `p_auto_advance = true` when no explicit status override, `false` when caller provides an explicit status
+- Empty RPC result → 404 (row not found / wrong org)
+
+**Migration file:** `supabase/migrations/00041_append_pipeline_draft_atomic.sql` — **NOT APPLIED — requires human-coordinated apply via Supabase SQL Editor (Citlali/Minervamon). Same workflow as 00033/00036/00037/00038/00040.**
+
+### M5 — GET Unbounded Result Set
+
+**Root cause:** `GET /api/grants/pipeline` called `.select("*")` with no limit/offset, returning the full org table on every page load.
+
+**Fix (`apps/web/src\app\api\grants\pipeline\route.ts`):**
+- Default limit: **200** (safe at current scale — see consumer finding below)
+- Max limit: 1000 (clamped, not errored)
+- Optional `limit` and `offset` query params with bounds-checking (limit ≥1, offset ≥0)
+- `meta.total` field added to response (additive, backward-compatible): reflects count BEFORE pagination so callers can detect truncation
+- Response shape unchanged for existing consumers: `{ data: [...] }` still works; `meta.total` is additive
+
+**Frontend consumer finding:** `apps/web/src/app/dashboard/grants/page.tsx` fetches `/api/grants/pipeline` without any limit/offset and does all filtering/sorting client-side. A 200-row default is high enough to be invisible at current scale. If an org exceeds 200 active grants, the kanban-style list page will silently show only the first 200 rows (ordered by `updated_at` DESC). The `meta.total` field allows a future caller to detect and paginate — flagged in PR body.
+
+**Key bugfix in implementation:** `.range()` must be called after the optional `.in()` filter in the Supabase client chain (calling `.in()` on a Promise from `.range()` throws). Fixed by moving `.range()` to after the conditional status-filter block.
+
+### Files Changed
+
+- `apps/web/src/app/api/grants/pipeline/[id]/route.ts` — M3 fix (RPC-based atomic append)
+- `apps/web/src/app/api/grants/pipeline/route.ts` — M5 fix (pagination + meta.total)
+- `supabase/migrations/00041_append_pipeline_draft_atomic.sql` — **NEW — NOT APPLIED**
+- `apps/web/src/app/api/grants/pipeline/__tests__/pipeline-routes.test.ts` — NEW — 15 tests
+
+### Verification
+
+- `pnpm --filter @edify/web test` — 242/242 tests passed (4 test files, including 15 new pipeline tests)
+- `pnpm --filter @edify/web typecheck` — clean, no errors
+
+### PR
+
+Opened as PR-B (DO NOT MERGE — awaiting Minervamon review).
+Sibling PRs: M1/M2 (grant-writing-handlers), M4 (GrantDetailDrawer) — no file overlap.
+
+---
+
+# SESSION-LOG — PR #39 M5 default-limit bump (reviewer request)
+
+**Identity:** Coding agent (Sonnet, spawned by Lopmon)
+**Branch:** `lopmon/m3-m5-pipeline-integrity` (worktree: pr39-bump-tmp)
+**Date:** 2026-06-10
+**Task:** Reviewer-requested change: raise M5 GET default limit from 200 → 1000 (= max) before merge.
+
+## Change
+
+- `apps/web/src/app/api/grants/pipeline/route.ts` — `GET_DEFAULT_LIMIT` changed from 200 → 1000. Added two-line comment above the constant recording the reviewer rationale: default temporarily equals max because the dashboard consumer (`apps/web/src/app/dashboard/grants/page.tsx`) is not pagination-aware; it fetches all rows and filters client-side, so a 200 default would silently truncate orgs with >200 pipeline rows. The default drops back to 200 once the dashboard reads `meta.total` and paginates. Updated the file-level consumer note and the inline query-param comment to match.
+- `apps/web/src/app/api/grants/pipeline/__tests__/pipeline-routes.test.ts` — Updated P1 test: description updated ("200" → "1000"), `range` assertion updated from `(0, 199)` to `(0, 999)`, added inline comment with the reviewer rationale.
+
+## Verification
+
+- `pnpm --filter web typecheck` — clean
+- `pnpm --filter web test` — 242/242 passed (4 test files)
+
+## Commit
+
+SHA to be filled after push.
+
+---
+
 ## 2026-06-10 — M4 Drawer Response-OK Fix (PR #38)
 
 **Agent:** Coding agent (Sonnet, spawned by Lopmon)
