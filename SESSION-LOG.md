@@ -2953,3 +2953,151 @@ SESSION-LOG.md merge=union
 ### Status
 
 COMPLETE — PR open, DO NOT MERGE — awaiting Minervamon review.
+# SESSION-LOG — PR-γ minors batch: pipeline route range validation (#6/#7)
+
+**Identity:** Coding agent (Sonnet, spawned by Lopmon)
+**Branch:** `lopmon/minors-pipeline-validation`
+**Worktree:** `C:\Users\Araly\edify-worktrees\minors-gamma`
+**Base:** `origin/main` @ `2dc133c`
+**Date:** 2026-06-10
+**Task:** Input range validation for grants pipeline routes (minors #6 + #7 from reviewer-approved batch).
+
+---
+
+## Plan
+
+1. Set up worktree off origin/main. ✓
+2. Read both route files to understand current structure. ✓
+3. Verify PATCH body interface — confirm amounts are NOT patchable. ✓
+4. Implement validation in POST route (amount range + org_fit_score range). ✓
+5. Implement validation in PATCH route (org_fit_score range only). ✓
+6. Add 18 new tests (V1–V18) to existing pipeline-routes.test.ts. ✓
+7. TypeScript check + full suite green. ✓
+8. Commit, push, PR (DO NOT MERGE — awaiting Minervamon review). ✓
+9. Remove worktree. ✓
+
+---
+
+## PATCH amounts finding
+
+`PatchPipelineBody` (line 25–35, `apps/web/src/app/api/grants/pipeline/[id]/route.ts`) does NOT include `amount_min` or `amount_max`. These fields are not patchable in the current schema — the PATCH handler only accepts `status`, `notes`, `draft`, and `org_fit_score`. Amount range validation was therefore **not added to PATCH** (as instructed: "if amounts aren't accepted by PATCH, say so and skip that half"). Any `amount_min`/`amount_max` in a PATCH body is silently ignored by the TypeScript cast.
+
+---
+
+## Validation added
+
+**POST `/api/grants/pipeline`** (route.ts, before `insertData` construction):
+1. Amount range: when both `amount_min` and `amount_max` are numbers, rejects with 400 if `amount_min > amount_max`. Error message names both fields and both received values. Single-side-only is allowed. Equal bounds (`min === max`) allowed.
+2. `org_fit_score` range: when provided as a number, rejects with 400 if outside 0–100. Error message names the field and received value. `null`/`undefined` remain allowed.
+
+**PATCH `/api/grants/pipeline/[id]`** ([id]/route.ts, within `org_fit_score` block):
+1. `org_fit_score` range: same 0–100 check before writing to `updateData`. Error message names field and received value.
+
+All error responses use `{ error: "..." }` shape matching the existing convention in both routes.
+
+---
+
+## Files changed
+
+- `apps/web/src/app/api/grants/pipeline/route.ts` — validation block added before insertData construction
+- `apps/web/src/app/api/grants/pipeline/[id]/route.ts` — org_fit_score range check added inside existing type guard
+- `apps/web/src/app/api/grants/pipeline/__tests__/pipeline-routes.test.ts` — 18 new tests (V1–V18), insert mock added to makeMockClient, makePostRequest helper, insertSingleReturnValue control var
+
+---
+
+## Test counts
+
+- Pre-existing tests: 15 (C1–C7, P1–P8) — all pass unchanged
+- New tests added: 18 (V1–V18)
+- Total in file: 33 tests, all green
+- Full suite (5 files, 276 tests): 273 pass, 3 timeout failures in grant-writing-revise/funder-profile test files — **pre-existing on main** (missing `@/lib/tools/grant-writing-handlers` module from a sibling PR not yet merged). Not caused by this PR.
+
+---
+
+## TypeScript
+
+`npx tsc --noEmit` — no errors.
+
+---
+
+## Status
+
+All checks green for in-scope files. PR open, awaiting Minervamon review. DO NOT MERGE until review complete.
+## Session: minors-beta — PR-β (Minors #1/#5) — 2026-06-10
+
+**Identity:** Coding agent (Sonnet, spawned by Lopmon)
+**Branch:** `lopmon/minors-drawer`
+**Worktree:** `C:\Users\Araly\edify-os\UsersAralyedify-worktreesminors-beta`
+**Base:** `origin/main` @ `2dc133c`
+**Date:** 2026-06-10
+**Scope:** `apps/web/src/components/grants/GrantDetailDrawer.tsx` ONLY — functional fixes, no visual changes
+
+### Task
+
+Two fixes from the reviewer-approved 10-minors batch (PR-β):
+
+1. **#1 — formatAmount zero handling**: `!min && !max` guard treated `amount_min: 0` as falsy → "Amount TBD". Also, `min && max` in the range branch had the same trap.
+2. **#5 — Dialog focus management**: `<aside>` had no `role="dialog"`, no `aria-labelledby`, Tab escaped into background DOM, no focus capture/restore on open/close.
+
+### Changes
+
+| Fix | Change |
+|---|---|
+| #1 `formatAmount` | Line 96: `!min && !max` → `min == null && max == null`. Line 98: `min && max && min !== max` → `min != null && max != null && min !== max`. Fallback line already uses `??` — no change needed. |
+| #5 Focus management | Added `role="dialog"` + `aria-modal="true"` + `aria-labelledby="grant-drawer-title"` to `<aside>`; removed old `aria-label="Grant detail"`. Added `id="grant-drawer-title"` to `<h2>`. Added `closeButtonRef` (focus target on open) and `previousFocusRef` (restore on close). Moved focus to close button via `requestAnimationFrame` on `grant?.id` change. Expanded single keydown handler to cover Escape (calls `handleClose` which restores focus then calls `onClose`) + Tab/Shift+Tab trap querying all focusable descendants. `useCallback` wraps `handleClose` for stable dep. No new dependency — manual trap (no `focus-trap` in package.json). |
+
+### Verification
+
+- `pnpm --filter @edify/web typecheck` — PASS (0 errors)
+- `pnpm --filter @edify/web test` — PASS (5 files, 258 tests)
+- No component-test infrastructure exists for `components/grants/` — noted in PR body; no test framework introduced.
+
+### PR
+
+Title: `fix(grants-drawer): formatAmount zero handling + dialog focus management (minors #1/#5)`
+Status: Open, awaiting Minervamon review — DO NOT MERGE
+---
+
+## Session: CI gate — hardening 2/2 (2026-06-10)
+
+**Agent:** Coding agent (Sonnet, spawned by Lopmon)
+**Branch:** `lopmon/ci-test-gate`
+**Worktree:** `C:\Users\Araly\edify-os\UsersAralyedify-worktreesh2-ci-gate`
+**Base:** `origin/main` @ `59cdbd5`
+**Task:** Add GitHub Actions CI workflow — PR test gate (typecheck + vitest). Hardening sprint 2/2.
+
+### Tooling facts gathered
+
+- **pnpm version**: `10.33.0` — sourced from root `package.json` `"packageManager"` field
+- **Node version**: No `.nvmrc`, no `.node-version`, no `engines` field declared → used Node 20 LTS (compatible with Next.js 14 + React 18 + TypeScript 5.7)
+- **typecheck script**: `pnpm --filter @edify/web typecheck` → runs `tsc --noEmit` (verified in `apps/web/package.json`)
+- **test script**: `pnpm --filter @edify/web test` → runs `vitest run` — already non-watch, CI-safe (verified in `apps/web/package.json` + `apps/web/vitest.config.ts`)
+- Root-level `typecheck` uses `turbo run typecheck` with `dependsOn: ["^build"]`; CI uses `--filter` directly to skip unnecessary build chain
+
+### Files changed
+
+- `.github/workflows/ci.yml` — NEW file, one job (`typecheck + tests`), triggers on `pull_request` to main and `push` to main
+
+### Workflow summary
+
+```
+trigger: pull_request → main, push → main
+job: typecheck + tests (ubuntu-latest)
+  1. actions/checkout@v4
+  2. pnpm/action-setup@v4  (version: 10.33.0)
+  3. actions/setup-node@v4 (node-version: 20, cache: pnpm)
+  4. pnpm install --frozen-lockfile
+  5. pnpm --filter @edify/web typecheck
+  6. pnpm --filter @edify/web test
+```
+
+### Post-merge step (requires admin)
+
+After merging this PR, enable required status checks in GitHub:
+`Settings → Branches → main → Branch protection rules → Require status checks to pass → search for "typecheck + tests" → Save`
+
+This makes the CI job a required gate that blocks merges if typecheck or vitest fails.
+
+### PR
+
+https://github.com/clm-studios/edify-os/pull/TBD — DO NOT MERGE (awaiting Minervamon review)

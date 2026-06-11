@@ -210,17 +210,40 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "citation_url is required" }, { status: 400 });
   }
 
+  // Validate amount range: reject only when both are provided and min > max
+  const amountMin = typeof body.amount_min === "number" ? body.amount_min : null;
+  const amountMax = typeof body.amount_max === "number" ? body.amount_max : null;
+  if (amountMin !== null && amountMax !== null && amountMin > amountMax) {
+    return NextResponse.json(
+      {
+        error: `amount_min (${amountMin}) must be ≤ amount_max (${amountMax})`,
+      },
+      { status: 400 },
+    );
+  }
+
+  // Validate org_fit_score: must be 0–100 when provided
+  const orgFitScore = typeof body.org_fit_score === "number" ? body.org_fit_score : null;
+  if (orgFitScore !== null && (orgFitScore < 0 || orgFitScore > 100)) {
+    return NextResponse.json(
+      {
+        error: `org_fit_score (${orgFitScore}) must be between 0 and 100`,
+      },
+      { status: 400 },
+    );
+  }
+
   const insertData = {
     org_id: orgId,
     grant_id: grant_id.trim(),
     source: source.trim(),
     funder_name: funder_name.trim(),
     opportunity_title: opportunity_title.trim(),
-    amount_min: typeof body.amount_min === "number" ? body.amount_min : null,
-    amount_max: typeof body.amount_max === "number" ? body.amount_max : null,
+    amount_min: amountMin,
+    amount_max: amountMax,
     due_date: body.due_date ?? null,
     citation_url: citation_url.trim(),
-    org_fit_score: typeof body.org_fit_score === "number" ? body.org_fit_score : null,
+    org_fit_score: orgFitScore,
     status: "discovered" as PipelineStatus,
     drafts: [],
     notes: body.notes ?? null,

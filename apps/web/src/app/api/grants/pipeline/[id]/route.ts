@@ -167,6 +167,14 @@ export async function PATCH(
   }
 
   if (typeof body.org_fit_score === "number") {
+    if (body.org_fit_score < 0 || body.org_fit_score > 100) {
+      return NextResponse.json(
+        {
+          error: `org_fit_score (${body.org_fit_score}) must be between 0 and 100`,
+        },
+        { status: 400 },
+      );
+    }
     updateData.org_fit_score = body.org_fit_score;
   }
 
