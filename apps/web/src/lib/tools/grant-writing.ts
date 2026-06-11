@@ -25,7 +25,7 @@ export const GRANT_WRITING_TOOLS_ADDENDUM = `
 ## Grant writing tools
 You have two grant-writing tools available for drafting and revising content.
 
-Use \`draft_grant_content\` when the user asks you to draft any section of a grant application. Supported section types for MVP: loi (Letter of Inquiry), statement_of_need, project_description, budget_narrative. Always call get_org_memory first to load the proof library (prior_grants, outcomes, voice_samples) before drafting — this is the cite-or-reject contract.
+Use \`draft_grant_content\` when the user asks you to draft any section of a grant application. Supported section types for MVP: loi (Letter of Inquiry), statement_of_need, project_description, budget_narrative. The proof library (prior_grants, outcomes, voice_samples) is loaded automatically — every number, outcome, and voice phrase in the draft must cite [N] to a proof library entry, or be written without specific figures rather than invented (cite-or-reject contract).
 
 Use \`revise_grant_content\` when the user wants to improve an existing draft. Accept a draft_id (from the pipeline) or pass draft_text directly. Apply the requested tone change precisely.
 
@@ -187,6 +187,7 @@ export const grantWritingTools: Anthropic.Tool[] = [
             "Optional tone direction: tighten (cut 15-25%), more_specific (add concrete details), less_jargon (plain language), more_urgent (increase stakes), add_data (pull in more outcome figures), cite_examples (add participant vignettes or case details).",
         },
       },
+      // Intentional: draft_id and draft_text are both optional — the handler validates that at least one is provided.
       required: [],
     },
   },
