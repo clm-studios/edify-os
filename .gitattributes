@@ -1,0 +1,2 @@
+# append-only log: union-merge so parallel PR appends never conflict
+SESSION-LOG.md merge=union
