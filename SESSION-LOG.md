@@ -2868,3 +2868,57 @@ Note: grant-narrative, logic-model, evaluation-plan, and budget-narrative were p
 - NEW: `apps/web/src/lib/skills/__tests__/skill-provenance.test.ts`
 - APPEND: `SESSION-LOG.md`
 
+
+
+---
+
+# SESSION-LOG — PR #43 Conflict Resolution + .gitattributes Union-Merge Fix
+
+**Identity:** Coding agent spawned by Lopmon
+**Branch:** `lopmon/skill-sources-provenance` (PR #43)
+**Worktree:** `C:\Users\Araly\edify-os\UsersAralyedify-worktreespr43-conflict-tmp`
+**Base:** merge of `origin/main` @ `2dc133c` into PR branch @ `4be006a`
+**Date:** 2026-06-10
+**Task:** Resolve SESSION-LOG.md merge conflict introduced when PR #41 (194-line history restore) merged to main after PR #43 was cut; add .gitattributes union-merge rule to prevent recurrence.
+
+---
+
+## Task 1 — Merge conflict resolution
+
+**Conflict files:** SESSION-LOG.md only (as expected; PR #43 only adds new files, so no other conflicts).
+
+**Resolution strategy:** Union-merge (append-only semantics). Both sides appended to a shared ancestor at line 2605:
+- `origin/main` side (PR #41): 194 lines — recovered entries from `apps/web/SESSION-LOG.md` (Sprint A.5, flyer-wow, flyer-fix, flyer-no-photo, mailchimp-oauth-followup; dates 2026-04-28 to 2026-06-01).
+- `HEAD` side (PR #43): Voice-Skills H1 entry (2026-06-10).
+
+Union result: PR #41 content placed first (chronologically earlier), PR #43 content appended after, separated by `---` divider. No entries deleted. No entries rewritten.
+
+**Merge commit:** `d6a7c44`
+
+---
+
+## Task 2 — .gitattributes union-merge rule
+
+**File created:** `.gitattributes` (repo root, new file — no prior .gitattributes existed anywhere in the repo).
+
+**Content:**
+```
+# append-only log: union-merge so parallel PR appends never conflict
+SESSION-LOG.md merge=union
+```
+
+**Caveat (noted in PR body):** `merge=union` concatenates both sides without conflict markers. Entry ORDER between concurrent PRs is whatever git produces — acceptable by design for an append-only log.
+
+---
+
+## Verification
+
+- `pnpm --filter web typecheck` — exit 0 (clean)
+- `pnpm --filter web test` — 268 tests pass, 0 fail, 0 skip
+
+---
+
+## Files changed
+
+- MODIFIED: `SESSION-LOG.md` (union-merge resolution + this entry)
+- NEW: `.gitattributes` (SESSION-LOG.md merge=union rule)
