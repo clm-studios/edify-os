@@ -16,7 +16,7 @@
  *   - Days-to-deadline semantic colors: green >30, amber 8-30, coral <8
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   X,
   ExternalLink,
@@ -93,9 +93,9 @@ function deadlineColorClass(days: number | null): string {
 }
 
 function formatAmount(min: number | null, max: number | null): string {
-  if (!min && !max) return "Amount TBD";
+  if (min == null && max == null) return "Amount TBD";
   const fmt = (n: number) => `$${(n >= 1000 ? `${(n / 1000).toFixed(0)}K` : n)}`;
-  if (min && max && min !== max) return `${fmt(min)}–${fmt(max)}`;
+  if (min != null && max != null && min !== max) return `${fmt(min)}–${fmt(max)}`;
   return fmt(min ?? max ?? 0);
 }
 
@@ -120,7 +120,10 @@ export function GrantDetailDrawer({
   onNotesChange,
   onStatusChange,
 }: GrantDetailDrawerProps) {
-  const drawerRef = useRef<HTMLDivElement>(null);
+  const drawerRef = useRef<HTMLElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  // Remembers the element that had focus before the drawer opened so we can restore it on close
+  const previousFocusRef = useRef<HTMLElement | null>(null);
   const [notes, setNotes] = useState(grant?.notes ?? "");
   const [notesSaving, setNotesSaving] = useState(false);
   const [notesSaveError, setNotesSaveError] = useState<string | null>(null);
@@ -134,14 +137,61 @@ export function GrantDetailDrawer({
     setNotes(grant?.notes ?? "");
   }, [grant?.id, grant?.notes]);
 
-  // Close on Escape
+  // On open: save previously-focused element and move focus into the drawer (close button)
+  useEffect(() => {
+    if (grant) {
+      previousFocusRef.current = document.activeElement as HTMLElement;
+      // Defer by one frame so the drawer is in the DOM before we focus
+      const frame = requestAnimationFrame(() => {
+        closeButtonRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [grant?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Stable close wrapper that also returns focus to the previously-focused element
+  const handleClose = useCallback(() => {
+    previousFocusRef.current?.focus();
+    onClose();
+  }, [onClose]);
+
+  // Keyboard handling: Escape to close + Tab-trap within the drawer
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        handleClose();
+        return;
+      }
+
+      if (e.key === "Tab" && drawerRef.current) {
+        const focusable = Array.from(
+          drawerRef.current.querySelectorAll<HTMLElement>(
+            'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          ),
+        ).filter((el) => !el.closest("[aria-hidden]"));
+
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
     }
+
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [onClose]);
+  }, [handleClose]);
 
   if (!grant) return null;
 
@@ -206,20 +256,22 @@ export function GrantDetailDrawer({
       {/* Backdrop */}
       <div
         className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm"
-        onClick={onClose}
+        onClick={handleClose}
         aria-hidden="true"
       />
 
       {/* Drawer */}
       <aside
         ref={drawerRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="grant-drawer-title"
         className={cn(
           "fixed right-0 top-0 z-50 h-full w-full max-w-md overflow-y-auto",
           "bg-[var(--bg-1)] shadow-2xl",
           "border-l border-[var(--line-2)]",
           "animate-slide-in-right",
         )}
-        aria-label="Grant detail"
       >
         {/* Header */}
         <div className="sticky top-0 z-10 border-b border-[var(--line-2)] bg-[var(--bg-1)] px-5 py-4">
@@ -228,12 +280,16 @@ export function GrantDetailDrawer({
               <p className="text-xs font-medium uppercase tracking-wider text-[var(--fg-3)]">
                 {grant.funder_name}
               </p>
-              <h2 className="mt-0.5 text-base font-semibold text-[var(--fg-1)] leading-snug">
+              <h2
+                id="grant-drawer-title"
+                className="mt-0.5 text-base font-semibold text-[var(--fg-1)] leading-snug"
+              >
                 {grant.opportunity_title}
               </h2>
             </div>
             <button
-              onClick={onClose}
+              ref={closeButtonRef}
+              onClick={handleClose}
               className="mt-0.5 shrink-0 rounded-lg p-1.5 text-[var(--fg-3)] hover:bg-[var(--bg-3)] hover:text-[var(--fg-1)]"
               aria-label="Close drawer"
             >
