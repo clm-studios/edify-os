@@ -510,28 +510,114 @@ const TONE_INSTRUCTIONS: Record<RevisionTone, string> = {
 
 export async function executeReviseGrantContent({
   input,
+  orgId,
+  serviceClient,
   anthropic,
 }: {
   input: Record<string, unknown>;
+  orgId: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   serviceClient: SupabaseClient<any>;
   anthropic: Anthropic;
 }): Promise<GrantDraftResult> {
   const typed = input as unknown as ReviseGrantContentInput;
 
-  const draftText = typed.draft_text;
+  // ---------------------------------------------------------------------------
+  // M2: draft_id resolution
+  //
+  // Contract: draft_id is the grants_pipeline row UUID (the `id` column). When
+  // provided, fetch the row for this org and use the highest-version draft's
+  // content_md as the draft text. This is the simplest contract consistent with
+  // the GrantDraft shape — there is no separate draft-level UUID, only version
+  // numbers within a pipeline row's drafts array, so row-id → latest-version
+  // is the natural resolution.
+  //
+  // If the row has no drafts yet, or the row isn't found for this org, return
+  // an instructive error telling the model which params to use instead.
+  // ---------------------------------------------------------------------------
+  let draftText = typed.draft_text;
+
+  if ((!draftText || typeof draftText !== "string" || draftText.trim().length === 0) && typed.draft_id) {
+    const draftId = typed.draft_id;
+    try {
+      const { data: pipelineRow, error: pipelineError } = await serviceClient
+        .from("grants_pipeline")
+        .select("id, org_id, drafts")
+        .eq("id", draftId)
+        .eq("org_id", orgId)
+        .single();
+
+      if (pipelineError || !pipelineRow) {
+        return {
+          content: `draft_id "${draftId}" was not found in the grants pipeline for this org. Either pass the correct pipeline row UUID as draft_id, or pass the draft text directly as draft_text.`,
+          is_error: true,
+        };
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const drafts: Array<{ section: string; content_md: string; version: number; drafted_at: string; drafted_by_tool: string }> = (pipelineRow.drafts as any[]) ?? [];
+      if (drafts.length === 0) {
+        return {
+          content: `Pipeline row "${draftId}" exists but has no saved drafts yet. Draft content first using draft_grant_content, then call revise_grant_content with the resulting draft_id or pass the text directly as draft_text.`,
+          is_error: true,
+        };
+      }
+
+      // Use the highest-version draft (latest revision)
+      const latestDraft = drafts.reduce((best, d) => (d.version > best.version ? d : best), drafts[0]);
+      draftText = latestDraft.content_md;
+    } catch (err) {
+      console.error("[grant-writing] draft_id lookup error:", err);
+      return {
+        content: `Failed to load draft from pipeline row "${draftId}": ${err instanceof Error ? err.message : "Unknown error"}. Pass the draft text directly as draft_text to proceed.`,
+        is_error: true,
+      };
+    }
+  }
+
   if (!draftText || typeof draftText !== "string" || draftText.trim().length === 0) {
     return {
-      content: "draft_text is required for revision. Pass the current draft content.",
+      content: "Provide the draft to revise via draft_text (the current draft content as a string) or via draft_id (the grants_pipeline row UUID — the tool will load the latest saved draft).",
       is_error: true,
     };
   }
 
   if (!typed.feedback && !typed.tone_change) {
     return {
-      content: "At least one of feedback or tone_change is required.",
+      content: "At least one of feedback or tone_change is required to specify what to revise.",
       is_error: true,
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // M1: load proof library substrate for the revision context
+  //
+  // The TONE_INSTRUCTIONS for add_data and cite_examples explicitly reference
+  // the proof library ("Add outcome figures with citations [entry_id] from the
+  // proof library", "Draw from voice_samples [entry_id] where available"). The
+  // original handler never loaded this material, so the model had nothing to
+  // draw from. We mirror the draft path: buildSubstrate → Block-2 uncached.
+  //
+  // For revision, content_type may be absent (the user may not know the section
+  // type). Fall back to "loi" substrate mapping when content_type is missing or
+  // not an MVP type — loi loads prior_grants (P) + outcomes (S) + voice_samples,
+  // which covers both add_data and cite_examples. This is a best-effort load;
+  // if the proof library is empty, revision still proceeds.
+  //
+  // NO cache_control on substrate block — house rule from PR #36.
+  // ---------------------------------------------------------------------------
+  const contentTypeForSubstrate = typed.content_type &&
+    (MVP_CONTENT_TYPES as readonly string[]).includes(typed.content_type)
+    ? typed.content_type as MvpContentType
+    : "loi";
+
+  let substrate = "";
+  try {
+    substrate = await buildSubstrate(serviceClient, orgId, contentTypeForSubstrate);
+  } catch (err) {
+    console.error("[grant-writing] Revision substrate build error:", err);
+    // Non-fatal: revision proceeds without substrate
+    substrate = "";
   }
 
   const revisionInstructions: string[] = [];
@@ -546,7 +632,25 @@ export async function executeReviseGrantContent({
     ? typed.content_type.replace(/_/g, " ")
     : "grant section";
 
-  const systemPrompt = `You are revising a ${contentTypeLabel} draft for a nonprofit grant application. Apply the revision instructions precisely. Preserve all citations [entry_id] from the original unless the feedback specifically asks you to remove them. Do not add uncited statistics.`;
+  // Build system blocks: Block-1 = revision persona (no cache_control — the revision
+  // system prompt is short and per-request already); Block-2 = substrate when present.
+  // The substrate is per-org proof library material — same uncached treatment as in
+  // executeDraftGrantContent per PR #36 house rule.
+  const substrateText = substrate.trim().length > 0
+    ? substrate
+    : "(No proof library entries found — do not add uncited statistics or unsourced vignettes.)";
+
+  const systemBlocks: Anthropic.TextBlockParam[] = [
+    {
+      type: "text",
+      text: `You are revising a ${contentTypeLabel} draft for a nonprofit grant application. Apply the revision instructions precisely. Preserve all existing citations [entry_id] from the original unless the feedback specifically asks you to remove them. For add_data and cite_examples tone directions, draw only from the proof library entries provided below — do not invent numbers or vignettes.`,
+    },
+    // Block-2: substrate — uncached (per-org content, NO cache_control per PR #36 house rule)
+    {
+      type: "text",
+      text: substrateText,
+    },
+  ];
 
   const userMessage = `Revision instructions:\n${revisionInstructions.join("\n\n")}\n\nOriginal draft:\n${draftText}\n\nRevise the draft now.`;
 
@@ -554,7 +658,7 @@ export async function executeReviseGrantContent({
     const response = await anthropic.messages.create({
       model: MODEL_IDS.sonnet,
       max_tokens: 2048,
-      system: systemPrompt,
+      system: systemBlocks as Anthropic.TextBlockParam[],
       messages: [{ role: "user", content: userMessage }],
     });
 

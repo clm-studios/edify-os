@@ -123,6 +123,8 @@ export function GrantDetailDrawer({
   const drawerRef = useRef<HTMLDivElement>(null);
   const [notes, setNotes] = useState(grant?.notes ?? "");
   const [notesSaving, setNotesSaving] = useState(false);
+  const [notesSaveError, setNotesSaveError] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
   const notesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Tracks which draft row is expanded; key = `${version}-${drafted_at}`
   const [expandedDraftKey, setExpandedDraftKey] = useState<string | null>(null);
@@ -156,13 +158,22 @@ export function GrantDetailDrawer({
     notesDebounceRef.current = setTimeout(async () => {
       if (!onNotesChange) return;
       setNotesSaving(true);
+      setNotesSaveError(null);
       try {
-        await fetch(`/api/grants/pipeline/${grantId}`, {
+        const res = await fetch(`/api/grants/pipeline/${grantId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ notes: value }),
         });
-        onNotesChange(grantId, value);
+        if (res.ok) {
+          onNotesChange(grantId, value);
+        } else {
+          console.error("[grant-drawer] Notes save failed:", res.status);
+          setNotesSaveError("Notes could not be saved. Please try again.");
+        }
+      } catch (err) {
+        console.error("[grant-drawer] Notes save error:", err);
+        setNotesSaveError("Notes could not be saved. Please try again.");
       } finally {
         setNotesSaving(false);
       }
@@ -171,15 +182,22 @@ export function GrantDetailDrawer({
 
   async function handleStatusAdvance() {
     if (!nextStatus || !onStatusChange) return;
+    setStatusError(null);
     try {
-      await fetch(`/api/grants/pipeline/${grantId}`, {
+      const res = await fetch(`/api/grants/pipeline/${grantId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: nextStatus }),
       });
-      onStatusChange(grantId, nextStatus);
+      if (res.ok) {
+        onStatusChange(grantId, nextStatus);
+      } else {
+        console.error("[grant-drawer] Status advance failed:", res.status);
+        setStatusError("Status could not be updated. Please try again.");
+      }
     } catch (err) {
       console.error("[grant-drawer] Status advance error:", err);
+      setStatusError("Status could not be updated. Please try again.");
     }
   }
 
@@ -355,6 +373,9 @@ export function GrantDetailDrawer({
             {notesSaving && (
               <p className="mt-1 text-xs text-[var(--fg-4)]">Saving…</p>
             )}
+            {!notesSaving && notesSaveError && (
+              <p className="mt-1 text-xs text-red-500" role="alert">{notesSaveError}</p>
+            )}
           </section>
 
           {/* Actions */}
@@ -381,6 +402,9 @@ export function GrantDetailDrawer({
                 <ChevronRight className="h-4 w-4" />
                 Move to {STATUS_LABELS[nextStatus]}
               </button>
+            )}
+            {statusError && (
+              <p className="text-xs text-red-500" role="alert">{statusError}</p>
             )}
 
             {/* Source link */}
