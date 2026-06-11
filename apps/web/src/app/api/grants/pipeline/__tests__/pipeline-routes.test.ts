@@ -1,5 +1,6 @@
 /**
- * Tests for grants pipeline routes — M3 (atomic draft append) and M5 (GET pagination).
+ * Tests for grants pipeline routes — M3 (atomic draft append), M5 (GET pagination),
+ * and input range validation (minors #6/#7).
  *
  * M3 — Concurrent draft-append safety
  * ---------------------------------------------------------------------------
@@ -35,6 +36,28 @@
  *   P7. Response shape backward-compatible: { data: [...], meta: { total } }.
  *   P8. Status filter still works with pagination.
  *
+ * V — Input range validation (minors #6/#7)
+ * ---------------------------------------------------------------------------
+ *   V1.  POST: amount_min > amount_max → 400 naming both fields + received values
+ *   V2.  POST: amount_min === amount_max (equal) → 201 (allowed)
+ *   V3.  POST: amount_min < amount_max → 201 (allowed)
+ *   V4.  POST: only amount_min provided (no amount_max) → 201 (allowed)
+ *   V5.  POST: only amount_max provided (no amount_min) → 201 (allowed)
+ *   V6.  POST: org_fit_score below 0 → 400 naming field + received value
+ *   V7.  POST: org_fit_score above 100 → 400 naming field + received value
+ *   V8.  POST: org_fit_score = 0 (boundary low) → 201 (allowed)
+ *   V9.  POST: org_fit_score = 100 (boundary high) → 201 (allowed)
+ *   V10. POST: org_fit_score fractional within 0–100 → 201 (allowed)
+ *   V11. PATCH: org_fit_score below 0 → 400
+ *   V12. PATCH: org_fit_score above 100 → 400
+ *   V13. PATCH: org_fit_score = 0 → 200 (allowed)
+ *   V14. PATCH: org_fit_score = 100 → 200 (allowed)
+ *   V15. PATCH: org_fit_score = 72.5 (fractional within range) → 200 (allowed)
+ *   V16. PATCH: amounts are NOT accepted (PatchPipelineBody has no amount fields —
+ *              amount_min/amount_max in PATCH body are silently ignored)
+ *   V17. POST: error JSON shape matches existing { error: "..." } convention
+ *   V18. PATCH: error JSON shape matches existing { error: "..." } convention
+ *
  * Mock strategy: the Supabase client and Next.js auth are mocked at the
  * module level so the routes can be exercised without a real DB connection.
  */
@@ -65,6 +88,9 @@ let singleReturnValue: { data: unknown; error: unknown } = { data: null, error: 
 /** Controls what update().select().single() returns */
 let updateSingleReturnValue: { data: unknown; error: unknown } = { data: null, error: null };
 
+/** Controls what insert().select().single() returns */
+let insertSingleReturnValue: { data: unknown; error: unknown } = { data: null, error: null };
+
 // Build a chainable Supabase query mock
 function makeMockClient() {
   const rangeResult = {
@@ -90,6 +116,13 @@ function makeMockClient() {
       select: vi.fn().mockReturnValue({
         single: vi.fn().mockImplementation(() =>
           Promise.resolve(updateSingleReturnValue),
+        ),
+      }),
+    }),
+    insert: vi.fn().mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        single: vi.fn().mockImplementation(() =>
+          Promise.resolve(insertSingleReturnValue),
         ),
       }),
     }),
@@ -143,6 +176,14 @@ function makeGetRequest(params?: Record<string, string>): NextRequest {
     }
   }
   return new NextRequest(url.toString());
+}
+
+function makePostRequest(body: unknown): NextRequest {
+  return new NextRequest("http://localhost/api/grants/pipeline", {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 function makePatchRequest(body: unknown, id = "grant-uuid-1"): [NextRequest, { params: { id: string } }] {
@@ -491,5 +532,190 @@ describe("M5 — GET /api/grants/pipeline pagination", () => {
       "internal_review",
     ]);
     expect(mockClient._queryChain.range).toHaveBeenCalledWith(0, 49);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V — Input range validation (minors #6/#7)
+// ---------------------------------------------------------------------------
+
+/** Minimal valid POST body — all required fields present, no optional range fields */
+const VALID_POST_BASE = {
+  grant_id: "GRANTS-GOV-001",
+  source: "grants_gov",
+  funder_name: "Test Foundation",
+  opportunity_title: "Youth Workforce Initiative",
+  citation_url: "https://grants.gov/001",
+};
+
+describe("V — POST /api/grants/pipeline amount + org_fit_score validation", () => {
+  let POST: (req: NextRequest) => Promise<Response>;
+
+  beforeEach(async () => {
+    mockClient = makeMockClient();
+    rpcCalls.length = 0;
+    insertSingleReturnValue = { data: makeRow(), error: null };
+    singleReturnValue = { data: null, error: null };
+    updateSingleReturnValue = { data: null, error: null };
+    const mod = await import("../route");
+    POST = mod.POST;
+  });
+
+  it("V1 — amount_min > amount_max → 400 naming both fields + received values", async () => {
+    const req = makePostRequest({ ...VALID_POST_BASE, amount_min: 50000, amount_max: 10000 });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(typeof body.error).toBe("string");
+    expect(body.error).toContain("amount_min");
+    expect(body.error).toContain("50000");
+    expect(body.error).toContain("amount_max");
+    expect(body.error).toContain("10000");
+  });
+
+  it("V2 — amount_min === amount_max → 201 (equal bounds allowed)", async () => {
+    const req = makePostRequest({ ...VALID_POST_BASE, amount_min: 25000, amount_max: 25000 });
+    const res = await POST(req);
+    expect(res.status).toBe(201);
+  });
+
+  it("V3 — amount_min < amount_max → 201 (valid range allowed)", async () => {
+    const req = makePostRequest({ ...VALID_POST_BASE, amount_min: 10000, amount_max: 50000 });
+    const res = await POST(req);
+    expect(res.status).toBe(201);
+  });
+
+  it("V4 — only amount_min provided (no amount_max) → 201 (single-side allowed)", async () => {
+    const req = makePostRequest({ ...VALID_POST_BASE, amount_min: 10000 });
+    const res = await POST(req);
+    expect(res.status).toBe(201);
+  });
+
+  it("V5 — only amount_max provided (no amount_min) → 201 (single-side allowed)", async () => {
+    const req = makePostRequest({ ...VALID_POST_BASE, amount_max: 50000 });
+    const res = await POST(req);
+    expect(res.status).toBe(201);
+  });
+
+  it("V6 — org_fit_score below 0 → 400 naming field + received value", async () => {
+    const req = makePostRequest({ ...VALID_POST_BASE, org_fit_score: -1 });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("org_fit_score");
+    expect(body.error).toContain("-1");
+  });
+
+  it("V7 — org_fit_score above 100 → 400 naming field + received value", async () => {
+    const req = makePostRequest({ ...VALID_POST_BASE, org_fit_score: 101 });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("org_fit_score");
+    expect(body.error).toContain("101");
+  });
+
+  it("V8 — org_fit_score = 0 (boundary low) → 201 (allowed)", async () => {
+    const req = makePostRequest({ ...VALID_POST_BASE, org_fit_score: 0 });
+    const res = await POST(req);
+    expect(res.status).toBe(201);
+  });
+
+  it("V9 — org_fit_score = 100 (boundary high) → 201 (allowed)", async () => {
+    const req = makePostRequest({ ...VALID_POST_BASE, org_fit_score: 100 });
+    const res = await POST(req);
+    expect(res.status).toBe(201);
+  });
+
+  it("V10 — org_fit_score fractional within 0–100 → 201 (allowed)", async () => {
+    const req = makePostRequest({ ...VALID_POST_BASE, org_fit_score: 72.5 });
+    const res = await POST(req);
+    expect(res.status).toBe(201);
+  });
+
+  it("V17 — POST error shape matches { error: '...' } convention", async () => {
+    const req = makePostRequest({ ...VALID_POST_BASE, amount_min: 99, amount_max: 1 });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json() as Record<string, unknown>;
+    // Must have exactly an "error" string field — no other top-level keys
+    expect(typeof body.error).toBe("string");
+    expect(Object.keys(body)).toEqual(["error"]);
+  });
+});
+
+describe("V — PATCH /api/grants/pipeline/[id] org_fit_score validation", () => {
+  let PATCH: (
+    req: NextRequest,
+    ctx: { params: { id: string } },
+  ) => Promise<Response>;
+
+  beforeEach(async () => {
+    mockClient = makeMockClient();
+    rpcCalls.length = 0;
+    // Non-draft PATCH path: first single() fetches existing row; second (via update chain) returns updated row
+    singleReturnValue = { data: makeRow(), error: null };
+    updateSingleReturnValue = { data: makeRow({ org_fit_score: 50 }), error: null };
+    insertSingleReturnValue = { data: null, error: null };
+    const mod = await import("../[id]/route");
+    PATCH = mod.PATCH;
+  });
+
+  it("V11 — org_fit_score below 0 → 400", async () => {
+    const [req, ctx] = makePatchRequest({ org_fit_score: -0.1 });
+    const res = await PATCH(req, ctx);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("org_fit_score");
+    expect(body.error).toContain("-0.1");
+  });
+
+  it("V12 — org_fit_score above 100 → 400", async () => {
+    const [req, ctx] = makePatchRequest({ org_fit_score: 100.1 });
+    const res = await PATCH(req, ctx);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("org_fit_score");
+    expect(body.error).toContain("100.1");
+  });
+
+  it("V13 — org_fit_score = 0 (boundary low) → 200 (allowed)", async () => {
+    updateSingleReturnValue = { data: makeRow({ org_fit_score: 0 }), error: null };
+    const [req, ctx] = makePatchRequest({ org_fit_score: 0 });
+    const res = await PATCH(req, ctx);
+    expect(res.status).toBe(200);
+  });
+
+  it("V14 — org_fit_score = 100 (boundary high) → 200 (allowed)", async () => {
+    updateSingleReturnValue = { data: makeRow({ org_fit_score: 100 }), error: null };
+    const [req, ctx] = makePatchRequest({ org_fit_score: 100 });
+    const res = await PATCH(req, ctx);
+    expect(res.status).toBe(200);
+  });
+
+  it("V15 — org_fit_score fractional within 0–100 → 200 (allowed)", async () => {
+    updateSingleReturnValue = { data: makeRow({ org_fit_score: 72.5 }), error: null };
+    const [req, ctx] = makePatchRequest({ org_fit_score: 72.5 });
+    const res = await PATCH(req, ctx);
+    expect(res.status).toBe(200);
+  });
+
+  it("V16 — amount_min/amount_max in PATCH body are silently ignored (not in PatchPipelineBody)", async () => {
+    // PATCH does not expose amount fields; providing them should not cause a 400
+    // (they are stripped by TypeScript type casting and never reach validation).
+    updateSingleReturnValue = { data: makeRow(), error: null };
+    const [req, ctx] = makePatchRequest({ notes: "test note", amount_min: 99999, amount_max: 1 });
+    const res = await PATCH(req, ctx);
+    // Should succeed — no amount validation in PATCH, amounts are unknown fields
+    expect(res.status).toBe(200);
+  });
+
+  it("V18 — PATCH error shape matches { error: '...' } convention", async () => {
+    const [req, ctx] = makePatchRequest({ org_fit_score: 150 });
+    const res = await PATCH(req, ctx);
+    expect(res.status).toBe(400);
+    const body = await res.json() as Record<string, unknown>;
+    expect(typeof body.error).toBe("string");
+    expect(Object.keys(body)).toEqual(["error"]);
   });
 });

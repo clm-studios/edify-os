@@ -2926,6 +2926,76 @@ SESSION-LOG.md merge=union
 
 ---
 
+# SESSION-LOG — PR-γ minors batch: pipeline route range validation (#6/#7)
+
+**Identity:** Coding agent (Sonnet, spawned by Lopmon)
+**Branch:** `lopmon/minors-pipeline-validation`
+**Worktree:** `C:\Users\Araly\edify-worktrees\minors-gamma`
+**Base:** `origin/main` @ `2dc133c`
+**Date:** 2026-06-10
+**Task:** Input range validation for grants pipeline routes (minors #6 + #7 from reviewer-approved batch).
+
+---
+
+## Plan
+
+1. Set up worktree off origin/main. ✓
+2. Read both route files to understand current structure. ✓
+3. Verify PATCH body interface — confirm amounts are NOT patchable. ✓
+4. Implement validation in POST route (amount range + org_fit_score range). ✓
+5. Implement validation in PATCH route (org_fit_score range only). ✓
+6. Add 18 new tests (V1–V18) to existing pipeline-routes.test.ts. ✓
+7. TypeScript check + full suite green. ✓
+8. Commit, push, PR (DO NOT MERGE — awaiting Minervamon review). ✓
+9. Remove worktree. ✓
+
+---
+
+## PATCH amounts finding
+
+`PatchPipelineBody` (line 25–35, `apps/web/src/app/api/grants/pipeline/[id]/route.ts`) does NOT include `amount_min` or `amount_max`. These fields are not patchable in the current schema — the PATCH handler only accepts `status`, `notes`, `draft`, and `org_fit_score`. Amount range validation was therefore **not added to PATCH** (as instructed: "if amounts aren't accepted by PATCH, say so and skip that half"). Any `amount_min`/`amount_max` in a PATCH body is silently ignored by the TypeScript cast.
+
+---
+
+## Validation added
+
+**POST `/api/grants/pipeline`** (route.ts, before `insertData` construction):
+1. Amount range: when both `amount_min` and `amount_max` are numbers, rejects with 400 if `amount_min > amount_max`. Error message names both fields and both received values. Single-side-only is allowed. Equal bounds (`min === max`) allowed.
+2. `org_fit_score` range: when provided as a number, rejects with 400 if outside 0–100. Error message names the field and received value. `null`/`undefined` remain allowed.
+
+**PATCH `/api/grants/pipeline/[id]`** ([id]/route.ts, within `org_fit_score` block):
+1. `org_fit_score` range: same 0–100 check before writing to `updateData`. Error message names field and received value.
+
+All error responses use `{ error: "..." }` shape matching the existing convention in both routes.
+
+---
+
+## Files changed
+
+- `apps/web/src/app/api/grants/pipeline/route.ts` — validation block added before insertData construction
+- `apps/web/src/app/api/grants/pipeline/[id]/route.ts` — org_fit_score range check added inside existing type guard
+- `apps/web/src/app/api/grants/pipeline/__tests__/pipeline-routes.test.ts` — 18 new tests (V1–V18), insert mock added to makeMockClient, makePostRequest helper, insertSingleReturnValue control var
+
+---
+
+## Test counts
+
+- Pre-existing tests: 15 (C1–C7, P1–P8) — all pass unchanged
+- New tests added: 18 (V1–V18)
+- Total in file: 33 tests, all green
+- Full suite (5 files, 276 tests): 273 pass, 3 timeout failures in grant-writing-revise/funder-profile test files — **pre-existing on main** (missing `@/lib/tools/grant-writing-handlers` module from a sibling PR not yet merged). Not caused by this PR.
+
+---
+
+## TypeScript
+
+`npx tsc --noEmit` — no errors.
+
+---
+
+## Status
+
+All checks green for in-scope files. PR open, awaiting Minervamon review. DO NOT MERGE until review complete.
 ## Session: minors-beta — PR-β (Minors #1/#5) — 2026-06-10
 
 **Identity:** Coding agent (Sonnet, spawned by Lopmon)
