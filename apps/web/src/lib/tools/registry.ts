@@ -544,7 +544,7 @@ export async function executeTool({
       return executeDraftGrantContent({ input, orgId, serviceClient, anthropic });
     }
     if (name === "revise_grant_content") {
-      return executeReviseGrantContent({ input, serviceClient, anthropic });
+      return executeReviseGrantContent({ input, orgId, serviceClient, anthropic });
     }
   }
 
