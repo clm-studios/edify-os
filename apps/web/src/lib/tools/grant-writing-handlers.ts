@@ -219,6 +219,15 @@ async function buildSubstrate(
 // Citation validation
 // ---------------------------------------------------------------------------
 
+// Matches any citation tag in a draft window:
+//   [cited: funder_profile]  — funder-sourced facts (PR-C)
+//   [cited: <source>, <date>] — full cited form with source + date
+//   [entry_id] / [entry-id]  — org proof-library tags (word chars + hyphens)
+//   [42]                     — numeric back-references
+//
+// No flags: used with .test() only — safe to share (no lastIndex state).
+const CITATION_RE = /\[cited:[^\]]+\]|\[\w[\w-]*\]|\[\d+\]/;
+
 // Detects digits not near a [N] or [entry_id] marker.
 // A number within 60 chars of a citation marker is considered cited.
 // Also detects quoted phrases (≥20 chars) not near a citation — these are
@@ -234,7 +243,7 @@ function detectUncitedClaims(draft: string): string[] {
     const pos = match.index;
     // Check 80 chars before and after for a citation marker [...]
     const window = draft.slice(Math.max(0, pos - 80), pos + 80);
-    const hasCitation = /\[\w[\w-]*\]|\[\d+\]/.test(window);
+    const hasCitation = CITATION_RE.test(window);
     if (!hasCitation) {
       // Exclude years (4-digit starting 19xx or 20xx) from the check
       const num = match[0].replace(/[,%]/g, "");
@@ -249,7 +258,7 @@ function detectUncitedClaims(draft: string): string[] {
     const pos = match.index;
     const phrase = match[1] ?? match[2] ?? "";
     const window = draft.slice(Math.max(0, pos - 80), pos + 80);
-    const hasCitation = /\[\w[\w-]*\]|\[\d+\]/.test(window);
+    const hasCitation = CITATION_RE.test(window);
     if (!hasCitation) {
       issues.push(`Quoted phrase "${phrase.slice(0, 40)}${phrase.length > 40 ? "…" : ""}" at position ${pos} appears uncited`);
     }
@@ -267,7 +276,7 @@ function annotateMissingCitations(draft: string): string {
     const clean = num.replace(/[,%]/g, "");
     if (clean.length === 4 && (clean.startsWith("19") || clean.startsWith("20"))) return match;
     const window = draft.slice(Math.max(0, offset - 80), offset + 80);
-    const hasCitation = /\[\w[\w-]*\]|\[\d+\]/.test(window);
+    const hasCitation = CITATION_RE.test(window);
     if (!hasCitation) return `${match} [?] _(missing citation)_`;
     return match;
   });
@@ -275,7 +284,7 @@ function annotateMissingCitations(draft: string): string {
   // Second pass: annotate uncited quoted phrases (≥20 chars, straight + curly quotes)
   result = result.replace(/(?:[""]([^""]{20,})[""]|"([^"]{20,})")/g, (match, _p1, _p2, offset) => {
     const window = result.slice(Math.max(0, offset - 80), offset + 80);
-    const hasCitation = /\[\w[\w-]*\]|\[\d+\]/.test(window);
+    const hasCitation = CITATION_RE.test(window);
     if (!hasCitation) return `${match} [?] _(missing citation)_`;
     return match;
   });
