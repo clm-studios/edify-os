@@ -2600,3 +2600,49 @@ New file: `apps/web/src/lib/tools/__tests__/grant-writing-revise.test.ts`
 ## PR
 
 https://github.com/clm-studios/edify-os/pull/TBD — DO NOT MERGE (awaiting Minervamon review)
+
+---
+
+## Session: CI gate — hardening 2/2 (2026-06-10)
+
+**Agent:** Coding agent (Sonnet, spawned by Lopmon)
+**Branch:** `lopmon/ci-test-gate`
+**Worktree:** `C:\Users\Araly\edify-os\UsersAralyedify-worktreesh2-ci-gate`
+**Base:** `origin/main` @ `59cdbd5`
+**Task:** Add GitHub Actions CI workflow — PR test gate (typecheck + vitest). Hardening sprint 2/2.
+
+### Tooling facts gathered
+
+- **pnpm version**: `10.33.0` — sourced from root `package.json` `"packageManager"` field
+- **Node version**: No `.nvmrc`, no `.node-version`, no `engines` field declared → used Node 20 LTS (compatible with Next.js 14 + React 18 + TypeScript 5.7)
+- **typecheck script**: `pnpm --filter @edify/web typecheck` → runs `tsc --noEmit` (verified in `apps/web/package.json`)
+- **test script**: `pnpm --filter @edify/web test` → runs `vitest run` — already non-watch, CI-safe (verified in `apps/web/package.json` + `apps/web/vitest.config.ts`)
+- Root-level `typecheck` uses `turbo run typecheck` with `dependsOn: ["^build"]`; CI uses `--filter` directly to skip unnecessary build chain
+
+### Files changed
+
+- `.github/workflows/ci.yml` — NEW file, one job (`typecheck + tests`), triggers on `pull_request` to main and `push` to main
+
+### Workflow summary
+
+```
+trigger: pull_request → main, push → main
+job: typecheck + tests (ubuntu-latest)
+  1. actions/checkout@v4
+  2. pnpm/action-setup@v4  (version: 10.33.0)
+  3. actions/setup-node@v4 (node-version: 20, cache: pnpm)
+  4. pnpm install --frozen-lockfile
+  5. pnpm --filter @edify/web typecheck
+  6. pnpm --filter @edify/web test
+```
+
+### Post-merge step (requires admin)
+
+After merging this PR, enable required status checks in GitHub:
+`Settings → Branches → main → Branch protection rules → Require status checks to pass → search for "typecheck + tests" → Save`
+
+This makes the CI job a required gate that blocks merges if typecheck or vitest fails.
+
+### PR
+
+https://github.com/clm-studios/edify-os/pull/TBD — DO NOT MERGE (awaiting Minervamon review)
