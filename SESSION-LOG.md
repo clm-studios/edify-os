@@ -2600,3 +2600,75 @@ New file: `apps/web/src/lib/tools/__tests__/grant-writing-revise.test.ts`
 ## PR
 
 https://github.com/clm-studios/edify-os/pull/TBD — DO NOT MERGE (awaiting Minervamon review)
+
+---
+
+# SESSION-LOG — Voice-Skills Hardening H1 (in-repo sources + byte-provenance test)
+
+**Identity:** Coding agent spawned by Lopmon
+**Branch:** `lopmon/skill-sources-provenance`
+**Worktree:** `C:\Users\Araly\edify-worktrees\h1-skill-sources`
+**Base:** `origin/main` @ `59cdbd5`
+**Date:** 2026-06-10
+**Task:** Commit the 9 Minervamon-authored voice-skill .md source files into the repo and add an automated byte-provenance test that compares each registry.ts addendum constant against its source file body.
+
+---
+
+## Steps completed
+
+1. **Worktree created** — `git worktree add` from C:\Users\Araly\edify-os on origin/main.
+
+2. **Source files copied** — 9 .md files into `apps/web/src/lib/skills/sources/`:
+   - archetype-voice-skills: board-comms.md, donor-voice.md, events-director.md, grant-narrative.md, programs-director.md, volunteer-coordinator.md
+   - grant-section-skills: logic-model.md, evaluation-plan.md, budget-narrative.md
+   - Plus `sources/README.md` (4-line pointer doc).
+
+3. **Provenance test written** — `apps/web/src/lib/skills/__tests__/skill-provenance.test.ts`:
+   - 10 tests: 1 registry-membership check + 9 per-skill byte-equality checks.
+   - Imports VOICE_SKILLS directly (no TS-text parsing); values are already unescaped at runtime.
+   - Comparison: CRLF→LF normalise, trim, strip YAML frontmatter from source file body.
+   - Explicit SKILL_TO_FILE map: skill id → source filename.
+
+4. **Provenance analysis** — full comparison run before writing tests:
+   - All 9 skills confirmed MATCH using proper template-literal-aware extraction.
+   - Naive regex comparison (re.DOTALL `.*?`) truncates at the first unescaped backtick in the body — corrected by a backtick-aware extraction that tracks escaped vs. unescaped backticks.
+   - No divergences found. All 9 tests written as passing (no skips needed).
+
+5. **Test suite** — 268 tests pass, 0 fail, 0 skip (258 pre-existing + 10 new).
+
+6. **Typecheck** — `pnpm --filter web exec tsc --noEmit` — exit 0, clean.
+
+---
+
+## Provenance verdict (all 9 skills)
+
+| Skill | Source file | Verdict | Body length |
+|---|---|---|---|
+| donor-voice | donor-voice.md | MATCH | 4848 chars |
+| board-comms | board-comms.md | MATCH | 4535 chars |
+| programs-director | programs-director.md | MATCH | 5227 chars |
+| events-director | events-director.md | MATCH | 5065 chars |
+| volunteer-coordinator | volunteer-coordinator.md | MATCH | 5126 chars |
+| grant-narrative | grant-narrative.md | MATCH | 6571 chars |
+| logic-model | logic-model.md | MATCH | 6013 chars |
+| evaluation-plan | evaluation-plan.md | MATCH | 6405 chars |
+| budget-narrative | budget-narrative.md | MATCH | 6051 chars |
+
+Note: grant-narrative, logic-model, evaluation-plan, and budget-narrative were previously byte-verified manually by Lopmon on 2026-06-10. The other 5 (archetype voice skills) were unverified before this session — all confirmed MATCH.
+
+---
+
+## Files changed
+
+- NEW: `apps/web/src/lib/skills/sources/board-comms.md`
+- NEW: `apps/web/src/lib/skills/sources/donor-voice.md`
+- NEW: `apps/web/src/lib/skills/sources/events-director.md`
+- NEW: `apps/web/src/lib/skills/sources/grant-narrative.md`
+- NEW: `apps/web/src/lib/skills/sources/logic-model.md`
+- NEW: `apps/web/src/lib/skills/sources/evaluation-plan.md`
+- NEW: `apps/web/src/lib/skills/sources/budget-narrative.md`
+- NEW: `apps/web/src/lib/skills/sources/programs-director.md`
+- NEW: `apps/web/src/lib/skills/sources/volunteer-coordinator.md`
+- NEW: `apps/web/src/lib/skills/sources/README.md`
+- NEW: `apps/web/src/lib/skills/__tests__/skill-provenance.test.ts`
+- APPEND: `SESSION-LOG.md`
