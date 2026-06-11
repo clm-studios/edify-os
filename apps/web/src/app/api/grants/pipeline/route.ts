@@ -5,6 +5,18 @@
  * Schema: grants_pipeline table (migration 00040_grants_pipeline.sql).
  * RLS enforces org isolation via current_user_org_ids() — service-role client
  * bypasses RLS for server-side writes; auth context validates the caller.
+ *
+ * M5 FIX (2026-06-10): GET now accepts limit/offset query params with
+ * bounds-checking and a default limit of 200.  The previous select("*") with
+ * no limit returned the full table for the org on every page load, which
+ * would degrade without bound as pipelines grow.
+ *
+ * Consumer note: the /dashboard/grants page fetches without explicit
+ * limit/offset and does client-side tab filtering.  The 200-row default is
+ * high enough to be invisible at current scale; if an org exceeds 200 rows
+ * the page will silently show only the first 200 (ordered by updated_at DESC).
+ * A meta.total field is included in the response so callers can detect
+ * truncation and paginate if needed — it is additive and backward-compatible.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -63,8 +75,18 @@ const VALID_STATUSES: PipelineStatus[] = [
 
 // ---------------------------------------------------------------------------
 // GET /api/grants/pipeline
-// Query params: status (optional filter, comma-separated)
+// Query params:
+//   status  — optional filter, comma-separated PipelineStatus values
+//   limit   — max rows to return (default 200, max 1000)
+//   offset  — rows to skip for pagination (default 0, min 0)
+// Response shape: { data: GrantPipelineRow[], meta: { total: number } }
+//   meta.total reflects the count BEFORE pagination so callers can detect
+//   truncation.  The shape is backward-compatible: existing consumers that
+//   destructure { data } continue to work unchanged.
 // ---------------------------------------------------------------------------
+
+const GET_DEFAULT_LIMIT = 200;
+const GET_MAX_LIMIT = 1000;
 
 export async function GET(req: NextRequest) {
   const { user, orgId } = await getAuthContext();
@@ -78,14 +100,40 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url);
+
+  // Status filter
   const statusParam = searchParams.get("status");
   const statusFilter = statusParam
     ? statusParam.split(",").filter((s): s is PipelineStatus => VALID_STATUSES.includes(s as PipelineStatus))
     : null;
 
+  // Pagination — parse, clamp, and validate
+  const rawLimit = searchParams.get("limit");
+  const rawOffset = searchParams.get("offset");
+
+  const parsedLimit = rawLimit !== null ? parseInt(rawLimit, 10) : GET_DEFAULT_LIMIT;
+  const parsedOffset = rawOffset !== null ? parseInt(rawOffset, 10) : 0;
+
+  if (
+    !Number.isFinite(parsedLimit) ||
+    parsedLimit < 1 ||
+    !Number.isFinite(parsedOffset) ||
+    parsedOffset < 0
+  ) {
+    return NextResponse.json(
+      { error: "limit must be ≥1, offset must be ≥0" },
+      { status: 400 },
+    );
+  }
+
+  const limit = Math.min(parsedLimit, GET_MAX_LIMIT);
+  const offset = parsedOffset;
+
+  // Base query with count for meta.total — apply status filter before range()
+  // (range must be the last builder call before execution)
   let query = serviceClient
     .from("grants_pipeline")
-    .select("*")
+    .select("*", { count: "exact" })
     .eq("org_id", orgId)
     .order("updated_at", { ascending: false });
 
@@ -93,14 +141,17 @@ export async function GET(req: NextRequest) {
     query = query.in("status", statusFilter);
   }
 
-  const { data, error } = await query;
+  const { data, error, count } = await query.range(offset, offset + limit - 1);
 
   if (error) {
     console.error("[grants-pipeline] GET error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ data: data ?? [] });
+  return NextResponse.json({
+    data: data ?? [],
+    meta: { total: count ?? 0 },
+  });
 }
 
 // ---------------------------------------------------------------------------
