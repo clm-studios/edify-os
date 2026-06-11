@@ -2417,3 +2417,92 @@ No other mutation fetches in this file were found with the same ungated-callback
 ### Coverage
 
 No component-test infrastructure exists for `components/grants/`. Coverage = TypeScript typecheck pass + existing 227-test suite green. No new tests added; no test infra created.
+
+---
+
+# Session Log — M1+M2 revise_grant_content completeness fixes (2026-06-10)
+
+**Agent:** Sonnet coding agent (spawned by Lopmon)
+**Branch:** `lopmon/m1-m2-revise-completeness`
+**Worktree:** `C:\Users\Araly\edify-os\UsersAralyedify-worktreesm1-m2-revise`
+**Base:** `origin/main` @ `02273a6`
+**Date:** 2026-06-10
+**Task:** Fix M1 (substrate not loaded in revise path) + M2 (draft_id declared in schema but not resolved in handler) per pr21-post-merge-review findings.
+
+## Scope
+
+Only files touched: `apps/web/src/lib/tools/grant-writing-handlers.ts`,
+`apps/web/src/lib/tools/registry.ts`, and the new test file
+`apps/web/src/lib/tools/__tests__/grant-writing-revise.test.ts`.
+Pipeline routes, GrantDetailDrawer, and skills/ not touched.
+
+## M1 — Substrate injection for revise path
+
+**Problem:** `executeReviseGrantContent` destructured only `{ input, anthropic }` — `serviceClient`
+was in the param type but unused. TONE_INSTRUCTIONS for `add_data` and `cite_examples`
+told the model to "Add citations [entry_id] from the proof library" and "Draw from
+voice_samples [entry_id]" but the handler never loaded those entries.
+
+**Fix:** Added `orgId` and `serviceClient` to destructured params. Calls `buildSubstrate()`
+with the content_type (falling back to `"loi"` mapping when content_type is absent or
+non-MVP — loi covers prior_grants/P + outcomes/S + voice_samples). Injects substrate
+into Block-2 (uncached — NO cache_control per PR #36 house rule). Graceful degradation
+when proof library is empty: passes a "(No proof library entries found...)" note in the
+substrate block so the model knows not to invent citations.
+
+**Categories loaded:** same as `buildSubstrate()` for the given content_type:
+- `loi` (default/fallback): prior_grants (P), outcomes (S), voice_samples (V), grant_writing.tone_rules
+- `statement_of_need`: prior_grants (P), outcomes (P), voice_samples (V), grant_writing.tone_rules
+- `project_description`: prior_grants (S), outcomes (P), voice_samples (V), grant_writing.tone_rules
+- `budget_narrative`: prior_grants (S), voice_samples (V), grant_writing.tone_rules, grant_writing.indirect_rate_default
+
+**Injection placement:** Block-2 (array index 1 of systemBlocks), after the revision persona
+text (index 0). No cache_control on any block. User message unchanged structure.
+
+## M2 — draft_id resolution
+
+**Problem:** `revise_grant_content` schema (grant-writing.ts:144) declared `draft_id` as
+"Accept a draft_id (from the pipeline)" but the handler only read `draft_text` and
+returned `"draft_text is required"` whenever the model passed `draft_id` — wasting a turn.
+
+**Contract chosen:** `draft_id` = grants_pipeline row UUID (the `id` column, used as
+`.eq("id", draftId).eq("org_id", orgId)`). Handler loads the row, picks the
+highest-`version` draft from the `drafts` jsonb array, uses its `content_md`.
+Rationale: GrantDraft has no per-draft UUID — only `version` (integer) within a row —
+so row-id → latest-version is the only unambiguous contract. Documented in inline
+comment.
+
+**Error paths:** all errors are instructive to the model:
+- Row not found → tells model to use correct UUID or pass `draft_text` directly
+- Row found but `drafts[]` empty → tells model to call `draft_grant_content` first
+- Neither param provided → tells model both params and their semantics
+- No feedback/tone_change → mentions both parameters by name
+
+## Registry change
+
+`registry.ts:547` — added `orgId` to the `executeReviseGrantContent` call (it was already
+passed to `executeDraftGrantContent` on the line above).
+
+## Tests
+
+New file: `apps/web/src/lib/tools/__tests__/grant-writing-revise.test.ts`
+16 tests covering:
+- R-M1-A: substrate block appears when entries exist (voice_samples, outcomes)
+- R-M1-B: no block has cache_control (PR #36 house rule)
+- R-M1-C: graceful degradation when proof library empty
+- R-M1-D: unknown content_type falls back to loi mapping
+- R-M2-A: draft_id resolves to latest-version draft content_md
+- R-M2-B: draft_text path unchanged
+- R-M2-C: neither param → instructive error mentioning both
+- R-M2-D: unknown draft_id → instructive error
+- R-M2-E: empty drafts array → instructive error with recovery hint
+- R-M2-F: no feedback/tone_change → instructive error
+
+## Test results
+
+`pnpm --filter web exec vitest run` — 4 files, 243 tests PASS (16 new + 34 existing funder-profile + 193 other)
+`pnpm exec tsc --noEmit` — exit 0 (clean)
+
+## PR
+
+https://github.com/clm-studios/edify-os/pull/TBD — DO NOT MERGE (awaiting Minervamon review)
