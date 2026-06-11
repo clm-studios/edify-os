@@ -2387,3 +2387,33 @@ VP describe block updated to assert NEW correct behavior:
 
 Opened as PR-C (do NOT merge — awaiting Minervamon review).
 References PRs #35 and #36.
+
+---
+
+## 2026-06-10 — M4 Drawer Response-OK Fix (PR #38)
+
+**Agent:** Coding agent (Sonnet, spawned by Lopmon)
+**Branch:** `lopmon/m4-drawer-response-ok`
+**File touched:** `apps/web/src/components/grants/GrantDetailDrawer.tsx` only
+
+### What was fixed
+
+Two mutation handlers in `GrantDetailDrawer.tsx` were calling optimistic parent-state callbacks unconditionally, regardless of whether the fetch succeeded.
+
+**`handleStatusAdvance`:** Now checks `response.ok` before calling `onStatusChange`. On `!ok` or thrown error, a `statusError` state variable surfaces the failure inline below the status-advance button via a `<p className="text-xs text-red-500" role="alert">` element. Button remains enabled so the user can retry.
+
+**`handleNotesChange`:** Now checks `response.ok` before calling `onNotesChange`. On failure, parent state is not updated and local textarea content is preserved (no data loss). A `notesSaveError` state variable surfaces the error inline adjacent to the saving indicator using the same `text-xs text-red-500 role="alert"` pattern.
+
+The inline error pattern (`text-xs text-red-500 role="alert"`) matches the existing codebase pattern from `dashboard/memory/page.tsx` — reuse over invention. No restyling; only functional state and pre-existing class names used.
+
+No other mutation fetches in this file were found with the same ungated-callback pattern.
+
+### Scope boundaries
+
+- No visual or cosmetic changes (UI/cosmetics owned by Z & Milo per standing rule)
+- No other files touched
+- No migrations
+
+### Coverage
+
+No component-test infrastructure exists for `components/grants/`. Coverage = TypeScript typecheck pass + existing 227-test suite green. No new tests added; no test infra created.
