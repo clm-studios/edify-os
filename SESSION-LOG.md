@@ -2603,6 +2603,7 @@ https://github.com/clm-studios/edify-os/pull/TBD — DO NOT MERGE (awaiting Mine
 
 ---
 
+
 ## Relocated entries — recovered from apps/web/SESSION-LOG.md (deleted in PR #40 cleanup; restored from c9cc073; root SESSION-LOG.md is the single canonical log per Minervamon 2026-06-11)
 
 Note: The Sprint A.5 entry below (PR #14) also appears in expanded form earlier in this file (2026-05-24 section, line 1055). The version below is the shorter summary form from apps/web/SESSION-LOG.md and is not verbatim identical to the detailed version above — both are preserved. The flyer-wow, flyer-fix, flyer-no-photo, and mailchimp-oauth-followup entries are unique to this recovered section and do not appear elsewhere in this log.
@@ -2794,6 +2795,134 @@ Fixed 3 minor reviewer findings from PR #23 (Mailchimp one-click OAuth). Finding
 
 `pnpm --filter web typecheck` — PASS
 `pnpm --filter web build` — PASS (125 pages generated, no errors)
+
+---
+
+# SESSION-LOG — Voice-Skills Hardening H1 (in-repo sources + byte-provenance test)
+
+**Identity:** Coding agent spawned by Lopmon
+**Branch:** `lopmon/skill-sources-provenance`
+**Worktree:** `C:\Users\Araly\edify-worktrees\h1-skill-sources`
+**Base:** `origin/main` @ `59cdbd5`
+**Date:** 2026-06-10
+**Task:** Commit the 9 Minervamon-authored voice-skill .md source files into the repo and add an automated byte-provenance test that compares each registry.ts addendum constant against its source file body.
+
+---
+
+## Steps completed
+
+1. **Worktree created** — `git worktree add` from C:\Users\Araly\edify-os on origin/main.
+
+2. **Source files copied** — 9 .md files into `apps/web/src/lib/skills/sources/`:
+   - archetype-voice-skills: board-comms.md, donor-voice.md, events-director.md, grant-narrative.md, programs-director.md, volunteer-coordinator.md
+   - grant-section-skills: logic-model.md, evaluation-plan.md, budget-narrative.md
+   - Plus `sources/README.md` (4-line pointer doc).
+
+3. **Provenance test written** — `apps/web/src/lib/skills/__tests__/skill-provenance.test.ts`:
+   - 10 tests: 1 registry-membership check + 9 per-skill byte-equality checks.
+   - Imports VOICE_SKILLS directly (no TS-text parsing); values are already unescaped at runtime.
+   - Comparison: CRLF→LF normalise, trim, strip YAML frontmatter from source file body.
+   - Explicit SKILL_TO_FILE map: skill id → source filename.
+
+4. **Provenance analysis** — full comparison run before writing tests:
+   - All 9 skills confirmed MATCH using proper template-literal-aware extraction.
+   - Naive regex comparison (re.DOTALL `.*?`) truncates at the first unescaped backtick in the body — corrected by a backtick-aware extraction that tracks escaped vs. unescaped backticks.
+   - No divergences found. All 9 tests written as passing (no skips needed).
+
+5. **Test suite** — 268 tests pass, 0 fail, 0 skip (258 pre-existing + 10 new).
+
+6. **Typecheck** — `pnpm --filter web exec tsc --noEmit` — exit 0, clean.
+
+---
+
+## Provenance verdict (all 9 skills)
+
+| Skill | Source file | Verdict | Body length |
+|---|---|---|---|
+| donor-voice | donor-voice.md | MATCH | 4848 chars |
+| board-comms | board-comms.md | MATCH | 4535 chars |
+| programs-director | programs-director.md | MATCH | 5227 chars |
+| events-director | events-director.md | MATCH | 5065 chars |
+| volunteer-coordinator | volunteer-coordinator.md | MATCH | 5126 chars |
+| grant-narrative | grant-narrative.md | MATCH | 6571 chars |
+| logic-model | logic-model.md | MATCH | 6013 chars |
+| evaluation-plan | evaluation-plan.md | MATCH | 6405 chars |
+| budget-narrative | budget-narrative.md | MATCH | 6051 chars |
+
+Note: grant-narrative, logic-model, evaluation-plan, and budget-narrative were previously byte-verified manually by Lopmon on 2026-06-10. The other 5 (archetype voice skills) were unverified before this session — all confirmed MATCH.
+
+---
+
+## Files changed
+
+- NEW: `apps/web/src/lib/skills/sources/board-comms.md`
+- NEW: `apps/web/src/lib/skills/sources/donor-voice.md`
+- NEW: `apps/web/src/lib/skills/sources/events-director.md`
+- NEW: `apps/web/src/lib/skills/sources/grant-narrative.md`
+- NEW: `apps/web/src/lib/skills/sources/logic-model.md`
+- NEW: `apps/web/src/lib/skills/sources/evaluation-plan.md`
+- NEW: `apps/web/src/lib/skills/sources/budget-narrative.md`
+- NEW: `apps/web/src/lib/skills/sources/programs-director.md`
+- NEW: `apps/web/src/lib/skills/sources/volunteer-coordinator.md`
+- NEW: `apps/web/src/lib/skills/sources/README.md`
+- NEW: `apps/web/src/lib/skills/__tests__/skill-provenance.test.ts`
+- APPEND: `SESSION-LOG.md`
+
+
+
+---
+
+# SESSION-LOG — PR #43 Conflict Resolution + .gitattributes Union-Merge Fix
+
+**Identity:** Coding agent spawned by Lopmon
+**Branch:** `lopmon/skill-sources-provenance` (PR #43)
+**Worktree:** `C:\Users\Araly\edify-os\UsersAralyedify-worktreespr43-conflict-tmp`
+**Base:** merge of `origin/main` @ `2dc133c` into PR branch @ `4be006a`
+**Date:** 2026-06-10
+**Task:** Resolve SESSION-LOG.md merge conflict introduced when PR #41 (194-line history restore) merged to main after PR #43 was cut; add .gitattributes union-merge rule to prevent recurrence.
+
+---
+
+## Task 1 — Merge conflict resolution
+
+**Conflict files:** SESSION-LOG.md only (as expected; PR #43 only adds new files, so no other conflicts).
+
+**Resolution strategy:** Union-merge (append-only semantics). Both sides appended to a shared ancestor at line 2605:
+- `origin/main` side (PR #41): 194 lines — recovered entries from `apps/web/SESSION-LOG.md` (Sprint A.5, flyer-wow, flyer-fix, flyer-no-photo, mailchimp-oauth-followup; dates 2026-04-28 to 2026-06-01).
+- `HEAD` side (PR #43): Voice-Skills H1 entry (2026-06-10).
+
+Union result: PR #41 content placed first (chronologically earlier), PR #43 content appended after, separated by `---` divider. No entries deleted. No entries rewritten.
+
+**Merge commit:** `d6a7c44`
+
+---
+
+## Task 2 — .gitattributes union-merge rule
+
+**File created:** `.gitattributes` (repo root, new file — no prior .gitattributes existed anywhere in the repo).
+
+**Content:**
+```
+# append-only log: union-merge so parallel PR appends never conflict
+SESSION-LOG.md merge=union
+```
+
+**Caveat (noted in PR body):** `merge=union` concatenates both sides without conflict markers. Entry ORDER between concurrent PRs is whatever git produces — acceptable by design for an append-only log.
+
+---
+
+## Verification
+
+- `pnpm --filter web typecheck` — exit 0 (clean)
+- `pnpm --filter web test` — 268 tests pass, 0 fail, 0 skip
+
+---
+
+## Files changed
+
+- MODIFIED: `SESSION-LOG.md` (union-merge resolution + this entry)
+- NEW: `.gitattributes` (SESSION-LOG.md merge=union rule)
+
 
 ---
 
