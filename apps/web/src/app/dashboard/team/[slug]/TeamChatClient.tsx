@@ -28,17 +28,39 @@ import { SuggestionChip } from "@/components/ui";
 import type { EnabledAgentsMap } from "@/app/api/team/enabled/route";
 
 // ---------------------------------------------------------------------------
-// projectErroredMessages — convert server status='errored' assistant rows
-// into the existing error-card shape so the retry UI works on rehydrate.
+// projectErroredMessages — convert stale/errored assistant rows into the
+// existing error-card shape so the retry UI works on rehydrate.
 //
-// Pairs with migration 00036: the chat route now writes status='errored' to
-// the messages row when the stream dies before a clean done event (timeout,
-// abort, throw). On the next mount, the client sees that status and renders
-// the retry affordance instead of loading dots.
+// Handles two cases:
+//   1. status='errored' — the stream died and the finally block (or sweeper)
+//      already landed a terminal status.
+//   2. status='streaming' AND older than STALE_STREAMING_MS — the Vercel
+//      hard-kill bypassed the finally block entirely; the sweeper runs daily
+//      so on-read detection ensures the user sees a retry card immediately
+//      instead of perpetual loading dots until the next sweep.
+//
+// Pairs with migration 00036 (chat route writes status='errored' on soft
+// failures) and the /api/cron/sweep-stuck-streams sweeper (marks rows stuck
+// past 90s as errored for DB consistency — needed because Vercel hard-kills
+// bypass try/catch/finally).
 // ---------------------------------------------------------------------------
+
+/** Age in ms after which a status='streaming' row is considered stale on rehydrate. */
+const STALE_STREAMING_MS = 70_000;
+
 function projectErroredMessages(msgs: Message[]): Message[] {
+  const now = Date.now();
   return msgs.map((m, i) => {
-    if (m.role !== "assistant" || m.status !== "errored") return m;
+    if (m.role !== "assistant") return m;
+
+    // Check: is this an errored row OR a stale streaming row?
+    const isExplicitlyErrored = m.status === "errored";
+    const isStaleStreaming =
+      m.status === "streaming" &&
+      now - new Date(m.timestamp).getTime() > STALE_STREAMING_MS;
+
+    if (!isExplicitlyErrored && !isStaleStreaming) return m;
+
     // Find the most recent user message before this assistant turn — that's
     // what a "Retry" click should re-send.
     let originalText = "";
@@ -141,10 +163,10 @@ function useStreamBuffer(isStreaming: boolean) {
 // ---------------------------------------------------------------------------
 const SUGGESTED_PROMPTS: Record<string, string[]> = {
   development_director: [
-    "Find grants we're eligible for in youth development",
-    "Draft an LOI for a $25K community foundation grant",
-    "Write a thank-you letter for a major donor",
-    "What grants are due this month?",
+    "Draft an LOI for our top-fit grant this month",
+    "Help me write the statement of need for our workforce program",
+    "What grants are due in the next two weeks?",
+    "Show me my voice samples",
   ],
   marketing_director: [
     "Create a 3-post social media series for our upcoming gala",

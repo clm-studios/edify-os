@@ -143,7 +143,7 @@ export async function POST(request: Request) {
       orgId,
       eventKey: "heartbeat:daily_brief",
       archetypeSlug: archetype,
-      userId: memberId,
+      userId: null,
     });
   } catch (err) {
     console.error("[heartbeat/trigger] runArchetypeTurn failed:", err);

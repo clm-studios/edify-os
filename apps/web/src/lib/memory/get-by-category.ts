@@ -155,3 +155,224 @@ export function serializeOutcomesForPrompt(entries: MemoryEntryRow[]): string {
   });
   return `Impact outcomes (${entries.length}):\n${lines.join("\n")}`;
 }
+
+// ---------------------------------------------------------------------------
+// Funder profile serializer (PR-B — read path)
+// ---------------------------------------------------------------------------
+
+/**
+ * Staleness check results for a funder profile entry.
+ *
+ * Per spec §8 / PRD §4:
+ *   - Profile older than 6 months (built_on / refreshed_on) → profile stale
+ *   - deadline/cycle fields (process_and_calendar.retrieved_date) older than
+ *     90 days → deadline fields stale
+ *
+ * "today" is accepted as a parameter to make the logic purely testable
+ * without mocking Date.now().
+ */
+export interface FunderProfileStalenessResult {
+  profileStale: boolean;
+  deadlineFieldsStale: boolean;
+  profileAgeMs: number | null;
+  deadlineAgeMs: number | null;
+}
+
+export function checkFunderProfileStaleness(
+  data: Record<string, unknown>,
+  today: Date = new Date()
+): FunderProfileStalenessResult {
+  const SIX_MONTHS_MS = 6 * 30 * 24 * 60 * 60 * 1000; // approx 6 months
+  const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
+
+  // Use refreshed_on if present, else built_on (spec: "flag at 6 months")
+  const profileDateStr = (data.refreshed_on as string | null | undefined) ?? (data.built_on as string | undefined);
+  let profileAgeMs: number | null = null;
+  let profileStale = false;
+  if (profileDateStr) {
+    const profileDate = new Date(profileDateStr);
+    if (!isNaN(profileDate.getTime())) {
+      profileAgeMs = today.getTime() - profileDate.getTime();
+      profileStale = profileAgeMs > SIX_MONTHS_MS;
+    }
+  }
+
+  // Deadline/cycle staleness: process_and_calendar.retrieved_date (spec: "flag at 90 days")
+  const processField = data.process_and_calendar as Record<string, unknown> | undefined;
+  const deadlineDateStr = processField?.retrieved_date as string | undefined;
+  let deadlineAgeMs: number | null = null;
+  let deadlineFieldsStale = false;
+  if (deadlineDateStr) {
+    const deadlineDate = new Date(deadlineDateStr);
+    if (!isNaN(deadlineDate.getTime())) {
+      deadlineAgeMs = today.getTime() - deadlineDate.getTime();
+      deadlineFieldsStale = deadlineAgeMs > NINETY_DAYS_MS;
+    }
+  }
+
+  return { profileStale, deadlineFieldsStale, profileAgeMs, deadlineAgeMs };
+}
+
+/**
+ * Serialize a funder_profile memory entry into a human-readable text block
+ * for injection into the draft_grant_content section prompt (Block-2, uncached).
+ *
+ * Staleness warnings (spec §8 / PRD §4):
+ *   - Profile older than 6 months → STALE warning header
+ *   - deadline/cycle fields older than 90 days → STALE warning on process section
+ *
+ * Claims in the output cite [cited: funder_profile] so the existing citation
+ * validator handles them identically to org-fact tags (spec §consumption).
+ */
+export function serializeFunderProfileForPrompt(entry: MemoryEntryRow, today?: Date): string {
+  const d = entry.data ?? {};
+  const staleness = checkFunderProfileStaleness(d, today);
+
+  const lines: string[] = [];
+
+  // --- Staleness header (opens the block if stale — spec requirement) ---
+  const stalenessWarnings: string[] = [];
+  if (staleness.profileStale) {
+    const ageMonths = staleness.profileAgeMs !== null
+      ? Math.round(staleness.profileAgeMs / (30 * 24 * 60 * 60 * 1000))
+      : "unknown number of";
+    stalenessWarnings.push(
+      `⚠ STALE PROFILE: This funder profile is approximately ${ageMonths} months old (last updated: ${(d.refreshed_on as string | null) ?? (d.built_on as string) ?? "unknown"}). ` +
+      `Key details (priorities, process, giving profile) may have changed. ` +
+      `Surface this staleness to the user and recommend refreshing the profile with research_funder before finalizing the draft.`
+    );
+  }
+  if (staleness.deadlineFieldsStale) {
+    const ageDays = staleness.deadlineAgeMs !== null
+      ? Math.round(staleness.deadlineAgeMs / (24 * 60 * 60 * 1000))
+      : "unknown number of";
+    stalenessWarnings.push(
+      `⚠ STALE DEADLINE/CYCLE DATA: Process and calendar fields are approximately ${ageDays} days old. ` +
+      `Deadline dates and application cycles should be verified before advising the user to submit.`
+    );
+  }
+
+  if (stalenessWarnings.length > 0) {
+    lines.push(stalenessWarnings.join("\n"));
+    lines.push("");
+  }
+
+  // --- Block header ---
+  const builtOn = (d.built_on as string | undefined) ?? "unknown";
+  const refreshedOn = d.refreshed_on as string | null | undefined;
+  const profileDate = refreshedOn ? `built ${builtOn}, last refreshed ${refreshedOn}` : `built ${builtOn}`;
+  lines.push(`## Funder profile: ${entry.title} [cited: funder_profile] (${profileDate})`);
+
+  // §1 Identity & basics
+  const funderType = (d.funder_type as string | undefined)?.replace(/_/g, " ") ?? "";
+  const parts: string[] = [];
+  if (funderType) parts.push(funderType);
+  if (d.geography_served) parts.push(`geography: ${d.geography_served as string}`);
+  if (d.website) parts.push(`site: ${d.website as string}`);
+  if (d.ein) parts.push(`EIN: ${d.ein as string}`);
+  if (parts.length > 0) lines.push(`**Identity:** ${parts.join(" | ")} [cited: funder_profile]`);
+
+  // §2 Priorities (verbatim phrases — the framing material for drafts)
+  const priorities = d.priorities as Record<string, unknown> | undefined;
+  if (priorities) {
+    const phrases = priorities.verbatim_phrases as Array<{ phrase: string; source?: string; retrieved_date?: string }> | undefined;
+    if (phrases && phrases.length > 0) {
+      lines.push(`**§2 Priorities (funder's own language — mirror in draft framing):**`);
+      for (const p of phrases) {
+        const src = p.source ? ` [cited: ${p.source}, ${p.retrieved_date ?? "date unknown"}]` : " [cited: funder_profile]";
+        lines.push(`  - "${p.phrase}"${src}`);
+      }
+      if (priorities.summary) {
+        lines.push(`  Summary: ${priorities.summary as string}`);
+      }
+    }
+  }
+
+  // §3 Giving profile (calibrates ask size and approach)
+  const giving = d.giving_profile as Record<string, unknown> | undefined;
+  if (giving) {
+    const givingParts: string[] = [];
+    if (giving.median_grant) givingParts.push(`median grant: ${giving.median_grant as string}`);
+    if (giving.grant_range) givingParts.push(`range: ${giving.grant_range as string}`);
+    if (giving.total_annual_giving) givingParts.push(`total giving: ${giving.total_annual_giving as string}`);
+    if (giving.grants_per_year) givingParts.push(`grants/year: ${giving.grants_per_year as string}`);
+    if (giving.multi_year_tendency) givingParts.push(`multi-year tendency: ${giving.multi_year_tendency as string}`);
+    if (givingParts.length > 0) {
+      lines.push(`**§3 Giving profile:** ${givingParts.join(" | ")} [cited: funder_profile]`);
+    }
+    const grantees = giving.recent_grantees as Array<{ name: string; amount?: string; purpose?: string; year?: string }> | undefined;
+    if (grantees && grantees.length > 0) {
+      const granteeStr = grantees.slice(0, 5).map((g) => {
+        const detail = [g.amount, g.purpose, g.year].filter(Boolean).join(", ");
+        return detail ? `${g.name} (${detail})` : g.name;
+      }).join("; ");
+      lines.push(`  Recent grantees: ${granteeStr} [cited: funder_profile]`);
+    }
+  }
+
+  // §4 Fit signals (lead with overlaps, address counter-signals)
+  const fit = d.fit_signals as Record<string, unknown> | undefined;
+  if (fit) {
+    const forSignals = fit.for_signals as string[] | undefined;
+    const counterSignals = fit.counter_signals as string[] | undefined;
+    if (forSignals && forSignals.length > 0) {
+      lines.push(`**§4 Fit — FOR this org:** ${forSignals.join("; ")} [cited: funder_profile]`);
+    }
+    if (counterSignals && counterSignals.length > 0) {
+      lines.push(`**§4 Fit — COUNTER-SIGNALS (address in draft):** ${counterSignals.join("; ")} [cited: funder_profile]`);
+    }
+  }
+
+  // §5 Process & calendar (constrains strategy)
+  const process = d.process_and_calendar as Record<string, unknown> | undefined;
+  if (process) {
+    const processParts: string[] = [];
+    if (process.application_route) processParts.push(`route: ${process.application_route as string}`);
+    if (process.cycle_dates) processParts.push(`cycles: ${process.cycle_dates as string}`);
+    if (process.decision_timeline) processParts.push(`decisions: ${process.decision_timeline as string}`);
+
+    // Stale deadline warning inline on the process section
+    const deadlineStaleNote = staleness.deadlineFieldsStale ? " ⚠ VERIFY BEFORE ADVISING — deadline data may be outdated" : "";
+
+    if (processParts.length > 0) {
+      lines.push(`**§5 Process:** ${processParts.join(" | ")} [cited: funder_profile]${deadlineStaleNote}`);
+    }
+    if (process.next_action && process.next_action_date) {
+      lines.push(`  Next action: ${process.next_action as string} by ${process.next_action_date as string} [cited: funder_profile]${deadlineStaleNote}`);
+    }
+  }
+
+  // §6 Style & format (constrains structure/length)
+  const style = d.style_and_format as Record<string, unknown> | undefined;
+  if (style) {
+    const styleParts: string[] = [];
+    if (style.page_word_limits) styleParts.push(`limits: ${style.page_word_limits as string}`);
+    if (style.stylistic_preferences) styleParts.push(`style: ${style.stylistic_preferences as string}`);
+    const sections = style.required_sections as string[] | undefined;
+    if (sections && sections.length > 0) styleParts.push(`required sections: ${sections.join(", ")}`);
+    if (styleParts.length > 0) {
+      lines.push(`**§6 Format:** ${styleParts.join(" | ")} [cited: funder_profile]`);
+    }
+    if (style.org_prior_submissions && (style.org_prior_submissions as string).trim()) {
+      lines.push(`  Org's prior submissions to this funder: ${style.org_prior_submissions as string} [cited: funder_profile]`);
+    }
+  }
+
+  // §7 Relationship history (adjusts register: first approach vs known relationship)
+  const relHistory = d.relationship_history as Record<string, unknown> | undefined;
+  const relEntries = relHistory?.entries as Array<{ type: string; date?: string; description: string }> | undefined;
+  if (relEntries && relEntries.length > 0) {
+    const relStr = relEntries.slice(0, 5).map((r) => {
+      const date = r.date ? ` (${r.date})` : "";
+      return `${r.type}${date}: ${r.description}`;
+    }).join("; ");
+    lines.push(`**§7 Relationship history:** ${relStr} [cited: funder_profile]`);
+  } else {
+    lines.push(`**§7 Relationship history:** No prior interactions on record — treat as first approach. [cited: funder_profile]`);
+  }
+
+  // Instruction block to the model on how to use this profile
+  lines.push(`\n**How to use this profile:** §2 phrases should appear in your framing vocabulary. §3 calibrates the ask and approach. §4 counter-signals must be addressed or acknowledged in the draft. §5 constrains the strategy (check for invitation-only). §6 constrains structure/length. §7 sets register. All claims sourced from this profile cite [cited: funder_profile].`);
+
+  return lines.join("\n");
+}

@@ -213,7 +213,7 @@ const INTEGRATIONS: IntegrationEntry[] = [
     category: 'marketing',
     description: 'Connect Mailchimp so your Marketing Director can manage your email campaigns, newsletters, and audience segments.',
     icon: SiMailchimp,
-    capabilities: ['Create and send campaigns', 'Manage audience segments', 'View campaign performance', 'Run A/B tests'],
+    capabilities: ['Draft email campaigns for your review', 'Manage audience lists and subscribers', 'View campaign performance and reports', 'Add and update subscriber profiles'],
     agentsUsing: [marketing],
     connectionType: 'oauth',
   },
@@ -627,6 +627,12 @@ const GOOGLE_INTEGRATION_IDS = new Set(['gmail', 'google_calendar', 'google_driv
 /** Integration types backed by Canva OAuth. */
 const CANVA_INTEGRATION_IDS = new Set(['canva']);
 
+/** Integration types backed by Mailchimp OAuth. */
+const MAILCHIMP_INTEGRATION_IDS = new Set(['mailchimp']);
+
+/** Integration types backed by Eventbrite OAuth. */
+const EVENTBRITE_INTEGRATION_IDS = new Set(['eventbrite']);
+
 /**
  * Integration ids that are brokered through Composio (OAuth on their end, we
  * just hold the connection reference). Keep in sync with TOOLKIT_SLUG in
@@ -653,7 +659,13 @@ const COMPOSIO_INTEGRATION_TO_PLATFORM: Record<string, string> = {
  * All other OAuth integrations are "coming soon".
  */
 function hasRealOAuthFlow(id: string): boolean {
-  return GOOGLE_INTEGRATION_IDS.has(id) || COMPOSIO_INTEGRATION_IDS.has(id) || CANVA_INTEGRATION_IDS.has(id);
+  return (
+    GOOGLE_INTEGRATION_IDS.has(id) ||
+    COMPOSIO_INTEGRATION_IDS.has(id) ||
+    CANVA_INTEGRATION_IDS.has(id) ||
+    MAILCHIMP_INTEGRATION_IDS.has(id) ||
+    EVENTBRITE_INTEGRATION_IDS.has(id)
+  );
 }
 
 function IntegrationsPageInner() {
@@ -717,6 +729,42 @@ function IntegrationsPageInner() {
   }, []);
 
   useEffect(() => { loadCanvaStatus(); }, [loadCanvaStatus]);
+
+  /* ---------- load Mailchimp connection status ---------- */
+
+  const loadMailchimpStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/integrations');
+      if (!res.ok) return;
+      const data = await res.json() as { connected: Array<{ integrationId: string }> };
+      const mailchimpRow = data.connected?.find((c) => c.integrationId === 'mailchimp');
+      if (mailchimpRow) {
+        setConnected((prev) => new Set([...prev, 'mailchimp']));
+      }
+    } catch {
+      // Non-fatal — UI degrades to disconnected state
+    }
+  }, []);
+
+  useEffect(() => { loadMailchimpStatus(); }, [loadMailchimpStatus]);
+
+  /* ---------- load Eventbrite connection status ---------- */
+
+  const loadEventbriteStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/integrations');
+      if (!res.ok) return;
+      const data = await res.json() as { connected: Array<{ integrationId: string }> };
+      const eventbriteRow = data.connected?.find((c) => c.integrationId === 'eventbrite');
+      if (eventbriteRow) {
+        setConnected((prev) => new Set([...prev, 'eventbrite']));
+      }
+    } catch {
+      // Non-fatal — UI degrades to disconnected state
+    }
+  }, []);
+
+  useEffect(() => { loadEventbriteStatus(); }, [loadEventbriteStatus]);
 
   /* ---------- load Composio (social) connection status ---------- */
 
@@ -808,6 +856,44 @@ function IntegrationsPageInner() {
     }
   }, [searchParams, router, loadCanvaStatus]);
 
+  /* ---------- handle ?mailchimp=connected / denied toast ---------- */
+
+  useEffect(() => {
+    const mailchimpParam = searchParams.get('mailchimp');
+    if (mailchimpParam === 'connected') {
+      loadMailchimpStatus();
+      setToast({ message: 'Mailchimp connected! Your Marketing Director can now manage your campaigns.', kind: 'success' });
+      router.replace('/dashboard/integrations', { scroll: false });
+    } else if (mailchimpParam === 'denied') {
+      const rawReason = searchParams.get('reason') ?? 'access_denied';
+      const reason = rawReason.slice(0, 100);
+      setToast({
+        message: `Mailchimp connection was not completed (${reason}). Please try again.`,
+        kind: 'error',
+      });
+      router.replace('/dashboard/integrations', { scroll: false });
+    }
+  }, [searchParams, router, loadMailchimpStatus]);
+
+  /* ---------- handle ?eventbrite=connected / denied toast ---------- */
+
+  useEffect(() => {
+    const eventbriteParam = searchParams.get('eventbrite');
+    if (eventbriteParam === 'connected') {
+      loadEventbriteStatus();
+      setToast({ message: 'Eventbrite connected! Your Events Director can now manage your events.', kind: 'success' });
+      router.replace('/dashboard/integrations', { scroll: false });
+    } else if (eventbriteParam === 'denied') {
+      const rawReason = searchParams.get('reason') ?? 'access_denied';
+      const reason = rawReason.slice(0, 100);
+      setToast({
+        message: `Eventbrite connection was not completed (${reason}). Please try again.`,
+        kind: 'error',
+      });
+      router.replace('/dashboard/integrations', { scroll: false });
+    }
+  }, [searchParams, router, loadEventbriteStatus]);
+
   /* ---------- auto-dismiss toast ---------- */
 
   useEffect(() => {
@@ -843,6 +929,18 @@ function IntegrationsPageInner() {
     // Canva integration — redirect to initiate route
     if (CANVA_INTEGRATION_IDS.has(id)) {
       window.location.href = '/api/integrations/canva/connect';
+      return;
+    }
+
+    // Mailchimp — redirect to initiate OAuth route
+    if (MAILCHIMP_INTEGRATION_IDS.has(id)) {
+      window.location.href = '/api/integrations/mailchimp/connect';
+      return;
+    }
+
+    // Eventbrite — redirect to initiate OAuth route
+    if (EVENTBRITE_INTEGRATION_IDS.has(id)) {
+      window.location.href = '/api/integrations/eventbrite/connect';
       return;
     }
 
@@ -971,6 +1069,46 @@ function IntegrationsPageInner() {
         setToast({ message: 'Canva disconnected.', kind: 'success' });
       } catch {
         setToast({ message: 'Failed to disconnect Canva. Please try again.', kind: 'error' });
+      }
+      return;
+    }
+
+    // Mailchimp — call the generic DELETE endpoint
+    if (MAILCHIMP_INTEGRATION_IDS.has(id)) {
+      try {
+        const res = await fetch(
+          `/api/integrations?integrationId=${encodeURIComponent(id)}`,
+          { method: 'DELETE' }
+        );
+        if (!res.ok) {
+          setToast({ message: 'Failed to disconnect Mailchimp. Please try again.', kind: 'error' });
+          return;
+        }
+        setConnected((prev) => { const next = new Set(prev); next.delete(id); return next; });
+        setExpandedId(null);
+        setToast({ message: 'Mailchimp disconnected.', kind: 'success' });
+      } catch {
+        setToast({ message: 'Failed to disconnect Mailchimp. Please try again.', kind: 'error' });
+      }
+      return;
+    }
+
+    // Eventbrite — call the generic DELETE endpoint
+    if (EVENTBRITE_INTEGRATION_IDS.has(id)) {
+      try {
+        const res = await fetch(
+          `/api/integrations?integrationId=${encodeURIComponent(id)}`,
+          { method: 'DELETE' }
+        );
+        if (!res.ok) {
+          setToast({ message: 'Failed to disconnect Eventbrite. Please try again.', kind: 'error' });
+          return;
+        }
+        setConnected((prev) => { const next = new Set(prev); next.delete(id); return next; });
+        setExpandedId(null);
+        setToast({ message: 'Eventbrite disconnected.', kind: 'success' });
+      } catch {
+        setToast({ message: 'Failed to disconnect Eventbrite. Please try again.', kind: 'error' });
       }
       return;
     }
@@ -1429,6 +1567,7 @@ function IntegrationsPageInner() {
           onSuccess={() => handleOAuthSuccess(oauthIntegration.id)}
         />
       )}
+
     </div>
   );
 }

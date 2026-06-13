@@ -12,6 +12,7 @@
  * Returns the final assistant text plus any generated files.
  */
 
+import { createHash } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ARCHETYPE_PROMPTS, buildCustomNameInstruction } from "@/lib/archetype-prompts";
@@ -29,6 +30,7 @@ import {
   FRONTEND_DESIGN_ARCHETYPES,
   FRONTEND_DESIGN_ADDENDUM,
   shouldAttachFrontendDesign,
+  selectVoiceSkillAddendum,
 } from "@/lib/skills/registry";
 import type { ArchetypeSlug } from "@/lib/archetypes";
 import { insertActivityEvent } from "@/lib/hours-saved/insert-event";
@@ -38,6 +40,32 @@ import { classifyIntent, INTENT_CLASSIFIER_ENABLED } from "@/lib/chat/classify-i
 
 const TOOL_USE_LOOP_MAX = 8;
 const MAX_RESPONSE_TOKENS = 4096;
+
+// ---------------------------------------------------------------------------
+// Server-side self-imposed deadline — Part A of the docx-abort fix.
+//
+// Vercel Hobby hard-kills functions at 60s maxDuration, bypassing try/catch/finally
+// so the assistant DB row stays stuck at 'streaming' forever. By setting our own
+// deadline 5s UNDER the Vercel ceiling we can abort in-flight Anthropic SDK calls
+// via AbortSignal, emit a terminal SSE event, and persist a terminal DB status —
+// all before Vercel's kill fires.
+//
+// The confirmed docx-stall pattern (Minervamon 2026-06-03 field-op):
+//   round 0 = 6s (tool planning) → round 1 = docx-build in Anthropic container
+//   = killed at 60s. With TURN_DEADLINE_MS=55000 the abort fires ~5s before the
+//   ceiling, giving our code time to flush and persist.
+//
+// Non-docx turns complete in ~6-40s and are unaffected.
+// ---------------------------------------------------------------------------
+const TURN_DEADLINE_MS = 55_000;
+
+// ---------------------------------------------------------------------------
+// Inline fallback note — appended to whatever the model produced in prior
+// rounds when the docx-build round is aborted (Part B strategy: option i).
+// Surface the inline draft already generated rather than a blank error.
+// ---------------------------------------------------------------------------
+const DOCX_TIMEOUT_NOTE =
+  "\n\n---\n_The downloadable document build exceeded the time limit on this request. The draft above was generated inline. You can retry to attempt the full document build._";
 
 // B. Model ID map — "sonnet" is the interactive default; "haiku" for cheap workloads.
 // Exported so classify-intent.ts can reference the same strings without duplication.
@@ -212,6 +240,12 @@ export async function runArchetypeTurn({
     FRONTEND_DESIGN_ARCHETYPES.has(archetype) && shouldAttachFrontendDesign(userMessage);
   const frontendDesignAddendum = attachFrontendDesign ? FRONTEND_DESIGN_ADDENDUM : "";
 
+  // E. Voice Skills — inject the first matching voice-skill addendum when archetype is
+  // eligible AND the user message matches the skill's intent triggers.
+  // Like frontendDesignAddendum, this is intent-gated and MUST stay in Block 2 (uncached)
+  // so it never busts the prompt cache for non-matching turns.
+  const voiceSkillAddendum = selectVoiceSkillAddendum(archetype, userMessage);
+
   // Fix #2 — Split stable vs conditional system prompt.
   //
   // Block 1 (CACHED): archetype-stable content — systemPrompt + orgContext + toolAddendums.
@@ -219,14 +253,14 @@ export async function runArchetypeTurn({
   // whether the user is chatting or requesting a document, so the cache NEVER busts mid-
   // conversation. Expected impact: ~40-60% TTFT reduction on turns 2+ once cache is warm.
   //
-  // Block 2 (NOT cached): intent-conditional addendums — skillsAddendum + frontendDesignAddendum.
+  // Block 2 (NOT cached): intent-conditional addendums — skillsAddendum + frontendDesignAddendum + voiceSkillAddendum.
   // These change based on detected intent so they must stay outside the cached prefix.
   // Sending them as a separate uncached block preserves model behavior while keeping Block 1 stable.
   //
   // Anthropic prefix-match semantics: cached blocks must come BEFORE uncached blocks.
   // Block 1 (cache_control: ephemeral) is first; Block 2 (no cache_control) is second. ✓
   const stableSystemText = systemPrompt + orgContext + toolAddendums;
-  const conditionalAddendums = skillsAddendum + frontendDesignAddendum;
+  const conditionalAddendums = skillsAddendum + frontendDesignAddendum + voiceSkillAddendum;
   const stableBlock = { type: "text" as const, text: stableSystemText, cache_control: { type: "ephemeral" as const } };
   const systemBlocks = conditionalAddendums
     ? [stableBlock, { type: "text" as const, text: conditionalAddendums }]
@@ -316,6 +350,46 @@ export async function runArchetypeTurn({
   let ttftMs: number | null = null;
   let firstTokenSeen = false;
 
+  // Part A — self-imposed deadline, 5s under Vercel's 60s hard-kill ceiling.
+  // Compute once here so all rounds share the same absolute deadline regardless of
+  // how many rounds fire or how long they take.
+  const turnDeadlineMs = turnStartMs + TURN_DEADLINE_MS;
+  // Set to true when any round is aborted by our deadline signal.
+  let turnDeadlineAborted = false;
+
+  // [perf] cachehash — emitted once per turn, before the round loop.
+  // Logs sha256 hex digests + lengths/counts of each cached component to diagnose
+  // which byte is busting the Anthropic prompt-cache prefix match across requests.
+  // mcpSha vs mcpNoTokenSha isolates whether the per-request OAuth authorization_token
+  // is the unstable byte (lead hypothesis from Minervamon's 2026-06-03 field capture).
+  // SECURITY: raw tokens are never logged; sha256 is one-way and token-stripped variant is logged.
+  {
+    const sha = (s: string) => createHash("sha256").update(s).digest("hex");
+    const b1Sha = sha(stableSystemText);
+    const b1Len = stableSystemText.length;
+    const b2Sha = sha(conditionalAddendums);
+    const toolsSha = sha(JSON.stringify(cachedTools));
+    const toolCount = cachedTools.length;
+    const mcpSha = sha(JSON.stringify(mcpServers));
+    const mcpNoTokenSha = sha(
+      JSON.stringify(mcpServers.map((s) => ({ ...s, authorization_token: undefined })))
+    );
+    const mcpCount = mcpServers.length;
+    console.log("[perf] cachehash", {
+      orgId,
+      archetype,
+      modelId,
+      b1Sha,
+      b1Len,
+      b2Sha,
+      toolsSha,
+      toolCount,
+      mcpSha,
+      mcpNoTokenSha,
+      mcpCount,
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Retry + Sonnet fallback helper (PR #16 C1 fix)
   //
@@ -330,6 +404,9 @@ export async function runArchetypeTurn({
   const RETRY_DELAYS_MS = [250, 750];
 
   function isTransient(err: unknown): boolean {
+    // Abort errors (from our deadline signal) must NOT be retried — they are
+    // intentional and should propagate immediately so the loop can handle them.
+    if (err instanceof Error && err.name === "AbortError") return false;
     if (err && typeof err === "object") {
       const status = (err as { status?: number }).status;
       if (typeof status === "number") return RETRYABLE_STATUSES.has(status);
@@ -386,12 +463,35 @@ export async function runArchetypeTurn({
     // Fix #1 — per-round timing: record when this round's API call starts.
     const roundStartMs = Date.now();
 
+    // Part A — per-round deadline enforcement.
+    // Compute remaining budget at the moment this round starts (not at turn start),
+    // so accumulating tool execution time is correctly counted against the budget.
+    const remainingMs = turnDeadlineMs - Date.now();
+    if (remainingMs <= 0) {
+      // Budget already exhausted before this round started — abort immediately.
+      console.warn("[runArchetypeTurn] deadline reached before round start", {
+        orgId, archetype, round, totalElapsedMs: Date.now() - turnStartMs,
+      });
+      turnDeadlineAborted = true;
+      loopHitCap = false;
+      break;
+    }
+
+    // Create a per-round AbortController that fires when our self-imposed deadline
+    // expires. The controller is cancelled (via clearTimeout) if the round completes
+    // normally so we don't leave dangling timers.
+    const roundAbortController = new AbortController();
+    const deadlineTimer = setTimeout(() => {
+      roundAbortController.abort(new DOMException("Turn deadline exceeded", "AbortError"));
+    }, remainingMs);
+
     // Use streaming API when an onTextDelta callback is provided.
     // Text deltas are pushed to the caller in real-time; we still await
     // finalMessage() to get the complete response for tool-use loop logic.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let response: any;
 
+    try {
     if (onTextDelta) {
       // Streaming path — use .stream() for real-time text deltas.
       // NOTE: if a Haiku stream emits text deltas before failing, the user sees partial
@@ -411,7 +511,7 @@ export async function runArchetypeTurn({
               : {}),
             ...(containerParam ? { container: containerParam } : {}),
             ...(mcpServers.length > 0 ? { mcp_servers: mcpServers } : {}),
-          });
+          }, { signal: roundAbortController.signal });
           stream.on("text", (textDelta) => {
             // Fix #1 — capture TTFT on the very first text delta (round 0 only).
             if (!firstTokenSeen) {
@@ -429,7 +529,7 @@ export async function runArchetypeTurn({
             system: systemBlocks,
             messages: loopMessages,
             ...(cachedTools.length > 0 ? { tools: cachedTools as unknown as Parameters<typeof anthropic.messages.create>[0]["tools"] } : {}),
-          });
+          }, { signal: roundAbortController.signal });
           stream.on("text", (textDelta) => {
             // Fix #1 — capture TTFT on the very first text delta (round 0 only).
             if (!firstTokenSeen) {
@@ -457,7 +557,7 @@ export async function runArchetypeTurn({
                 : {}),
               ...(containerParam ? { container: containerParam } : {}),
               ...(mcpServers.length > 0 ? { mcp_servers: mcpServers } : {}),
-            })
+            }, { signal: roundAbortController.signal })
           : anthropic.messages.create({
               model: mid,
               max_tokens: MAX_RESPONSE_TOKENS,
@@ -465,9 +565,39 @@ export async function runArchetypeTurn({
               system: systemBlocks,
               messages: loopMessages,
               ...(cachedTools.length > 0 ? { tools: cachedTools as unknown as Parameters<typeof anthropic.messages.create>[0]["tools"] } : {}),
-            }),
+            }, { signal: roundAbortController.signal }),
       round);
     }
+    } catch (roundErr) {
+      // Part A — catch abort errors from our deadline signal.
+      // Any other error is re-thrown to the outer loop error handler.
+      clearTimeout(deadlineTimer);
+      if (roundErr instanceof Error && roundErr.name === "AbortError") {
+        // Our self-imposed deadline fired. Surface the inline draft and break
+        // cleanly so the route can emit a terminal SSE event + persist the row.
+        console.warn("[runArchetypeTurn] deadline abort on round", {
+          orgId, archetype, round, totalElapsedMs: Date.now() - turnStartMs,
+        });
+        turnDeadlineAborted = true;
+        loopHitCap = false;
+        break;
+      }
+      throw roundErr;
+    }
+    clearTimeout(deadlineTimer);
+
+    // Docx-stall triage: cheap content scan to flag a code-execution round —
+    // one that carries code-exec tool-result blocks (which is where docx file
+    // outputs arrive). Computed BEFORE the round log so we can tag that log with
+    // a greppable `codeExecRound` flag, letting a stalled LOI turn be attributed
+    // to the code-exec round (candidate (a)) vs a plain generation round. No PII.
+    const CODE_EXEC_RESULT_TYPES = new Set([
+      "bash_code_execution_tool_result",
+      "code_execution_tool_result",
+    ]);
+    const codeExecRound = Array.isArray(response.content)
+      ? response.content.some((b: { type: string }) => CODE_EXEC_RESULT_TYPES.has(b.type))
+      : false;
 
     // Accumulate token usage from this API response
     // Fix #1 — also log per-round structured metrics for Vercel log filtering.
@@ -484,6 +614,8 @@ export async function runArchetypeTurn({
       tokenUsage.cacheCreationTokens += roundCacheCreation;
       // Fix #1 — per-round structured log. Filter in Vercel with: [perf]
       // No PII: no message content, no user identifiers — only metrics.
+      // codeExecRound (docx-stall triage) flags the round that ran the docx skill
+      // in the Anthropic container — its durationMs is candidate stall point (a).
       console.log("[perf] round", {
         orgId,
         archetype,
@@ -494,11 +626,21 @@ export async function runArchetypeTurn({
         cacheReadTokens: roundCacheRead,
         cacheCreationTokens: roundCacheCreation,
         stopReason: response.stop_reason,
+        codeExecRound,
       });
     }
 
     // Collect any skill-generated file outputs (two block-type variants from the beta API)
+    //
+    // Docx-stall triage instrumentation (diagnosis only — no behavior change):
+    // wrap the file-collection block with wall-time so the time spent collecting
+    // files in a round is visible DISTINCTLY from the model-generation time already
+    // captured by [perf] round.durationMs. `filesCollected` counts the file_id
+    // outputs we hand to collectFileOutput. Mirrors the existing
+    // `console.log("[perf] <name>", {...})` convention: fire-and-forget, no PII.
     if (attachSkills) {
+      const fileCollectStartMs = Date.now();
+      let filesCollected = 0;
       const FILE_RESULT_TYPES: Record<string, string> = {
         bash_code_execution_tool_result: "bash_code_execution_result",
         code_execution_tool_result: "code_execution_result",
@@ -515,6 +657,7 @@ export async function runArchetypeTurn({
         if (result?.type === expectedResultType && Array.isArray(result.content)) {
           for (const output of result.content) {
             if (output.file_id) {
+              filesCollected++;
               await collectFileOutput(
                 output.file_id,
                 anthropic,
@@ -526,6 +669,19 @@ export async function runArchetypeTurn({
             }
           }
         }
+      }
+      // Only emit when this round actually produced file outputs — keeps the
+      // log channel focused on the docx-build path and avoids per-round noise.
+      if (filesCollected > 0) {
+        // [perf] file_collect — wall-time for the whole file-collection step in
+        // this round. Filter in Vercel with: [perf] file_collect
+        console.log("[perf] file_collect", {
+          orgId,
+          archetype,
+          round,
+          filesCollected,
+          collectMs: Date.now() - fileCollectStartMs,
+        });
       }
     }
 
@@ -606,7 +762,7 @@ export async function runArchetypeTurn({
                 orgId,
                 eventKey: `tool:${block.name}`,
                 archetypeSlug: archetype,
-                userId: memberId,
+                userId: null,
                 metadata: { tool_use_id: block.id },
               });
             }
@@ -667,9 +823,28 @@ export async function runArchetypeTurn({
     break;
   }
 
-  // Loop cap hit — every round was tool_use with no final end_turn text.
-  // Surface a failure notice rather than silently using an interim assistant sentence.
-  if (loopHitCap) {
+  // Part A+B — deadline abort handling.
+  // When our self-imposed 55s deadline fired mid-round, surface whatever the model
+  // produced in prior rounds as an inline draft (Part B strategy i), then append
+  // a note so the user knows the downloadable build was cut short and can retry.
+  // This runs BEFORE the loopHitCap check so the abort path wins.
+  if (turnDeadlineAborted) {
+    const elapsed = Date.now() - turnStartMs;
+    console.warn("[runArchetypeTurn] Turn aborted by deadline", {
+      orgId, archetype, elapsedMs: elapsed, hadPartialText: !!lastAssistantText,
+    });
+    if (lastAssistantText) {
+      // Part B (strategy i): show the inline draft already generated + note.
+      finalAssistantText = lastAssistantText + DOCX_TIMEOUT_NOTE;
+    } else {
+      // No prior text at all (abort hit on round 0 — extremely unlikely given
+      // the 55s budget and typical 6s round 0 latency). Surface a clear message.
+      finalAssistantText =
+        "The request timed out before a response could be generated. Please retry — shorter or simpler requests are less likely to hit the time limit.";
+    }
+  } else if (loopHitCap) {
+    // Loop cap hit — every round was tool_use with no final end_turn text.
+    // Surface a failure notice rather than silently using an interim assistant sentence.
     console.warn("[runArchetypeTurn] Tool-use loop hit TOOL_USE_LOOP_MAX", {
       toolErrorCount,
       hadPartialText: !!lastAssistantText,
@@ -699,7 +874,7 @@ export async function runArchetypeTurn({
       orgId,
       eventKey: "chat:turn_no_tools",
       archetypeSlug: archetype,
-      userId: memberId,
+      userId: null,
     });
   }
 
@@ -745,10 +920,29 @@ async function collectFileOutput(
   let mimeType = "application/octet-stream";
   let ext = "";
 
+  // Docx-stall triage instrumentation (diagnosis only — no behavior change).
+  // Stage timing around the only synchronous network call in this helper
+  // (retrieveMetadata). The actual file download + storage proxy happens
+  // lazily in /api/files/[fileId] when the user clicks, NOT here — so the
+  // in-turn stall, if it lives in this helper, must be the metadata fetch.
+  // Mirrors the existing `console.log("[perf] <name>", {...})` convention:
+  // fire-and-forget, no PII (only durations, ids, mime, ext, flags).
+  const collectStartMs = Date.now();
+  let metadataMs: number | null = null;
+  // "stage" pins which step a stall lands on if this log is the last one emitted
+  // before a turn hangs. It advances as we progress through the helper.
+  let stage = "metadata_retrieve";
+  let downloadable: boolean | undefined;
+  let metadataOk = false;
+
   try {
+    const metaStartMs = Date.now();
     const meta = await anthropic.beta.files.retrieveMetadata(fileId, {
       headers: { "anthropic-beta": "files-api-2025-04-14" },
     } as Parameters<typeof anthropic.beta.files.retrieveMetadata>[1]);
+    metadataMs = Date.now() - metaStartMs;
+    metadataOk = true;
+    stage = "post_metadata";
 
     // If Anthropic flags this file as not downloadable (e.g. a code-execution
     // container intermediate), don't surface it to chat — clicking it would
@@ -756,7 +950,19 @@ async function collectFileOutput(
     // just suppress the user-facing artifact pill.
     // Strict === false: only skip when the API explicitly says false. If
     // downloadable is true or undefined, keep the existing behavior.
-    if ((meta as { downloadable?: boolean }).downloadable === false) {
+    downloadable = (meta as { downloadable?: boolean }).downloadable;
+    if (downloadable === false) {
+      // [perf] docx — early-return path (suppressed artifact). Filter: [perf] docx
+      console.log("[perf] docx", {
+        orgId: trackingCtx?.orgId,
+        archetype: trackingCtx?.archetype,
+        stage: "skipped_not_downloadable",
+        fileIdLen: fileId.length,
+        metadataMs,
+        metadataOk,
+        downloadable,
+        totalMs: Date.now() - collectStartMs,
+      });
       return;
     }
 
@@ -767,12 +973,30 @@ async function collectFileOutput(
     }
   } catch {
     // Non-fatal — use fileId as fallback name
+    if (metadataMs === null) metadataMs = Date.now() - collectStartMs;
+    stage = "metadata_error";
   }
 
   generatedFiles.push({
     name: filename,
     mimeType,
     downloadUrl: `/api/files/${encodeURIComponent(fileId)}`,
+  });
+  stage = "collected";
+
+  // [perf] docx — per-collected-file stage timing. Filter in Vercel with: [perf] docx
+  // No PII: only the fileId length (not the id text), mime, ext, durations, flags.
+  console.log("[perf] docx", {
+    orgId: trackingCtx?.orgId,
+    archetype: trackingCtx?.archetype,
+    stage,
+    fileIdLen: fileId.length,
+    ext: ext || null,
+    mimeType,
+    metadataMs,
+    metadataOk,
+    downloadable,
+    totalMs: Date.now() - collectStartMs,
   });
 
   // Fire-and-forget: track skill document generation for hours-saved counter.
@@ -781,7 +1005,7 @@ async function collectFileOutput(
       orgId: trackingCtx.orgId,
       eventKey: `skill:${ext}`,
       archetypeSlug: trackingCtx.archetype,
-      userId: trackingCtx.memberId,
+      userId: null,
       metadata: { file_id: fileId },
     });
   }
