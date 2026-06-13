@@ -114,6 +114,12 @@ export const ARCHETYPE_PLUGIN_SKILLS: Record<ArchetypeSlug, string[]> = {
     resolve("development/grant_proposal_writer"),
     resolve("development/donor_stewardship_sequence"),
     resolve("development/impact_report"),
+    // Anthropic open-source UI skills (Apache 2.0, lifted 2026-05-27)
+    // Useful for Dev Director when presenting data dashboards, donor reports,
+    // or interactive React components to board / program staff.
+    resolve("design/frontend-design"),
+    resolve("design/web-artifacts-builder"),
+    resolve("design/theme-factory"),
   ].filter(Boolean) as string[],
   programs_director: [
     resolve("operations/process-doc"),
