@@ -5,24 +5,24 @@
     "uploaded_at": "2026-04-25T18:06:00.000Z"
   },
   "design/design-critique": {
-    "skill_id": "skill_01HF3oa5oQoKZx9ZQTPXPipB",
-    "hash": "55100e100ac27891",
-    "uploaded_at": "2026-04-29T22:53:15.264Z"
+    "skill_id": "skill_01UtrCfP2s4tJycTxmckcV7k",
+    "hash": "ef158c069ebac674",
+    "uploaded_at": "2026-06-13T18:07:20.962Z"
   },
   "marketing/brand-review": {
-    "skill_id": "skill_01TApTBicP212sHA33FagaDx",
-    "hash": "266e6795caefed69",
-    "uploaded_at": "2026-04-29T22:53:18.750Z"
+    "skill_id": "skill_01G8soFRB5JeybK7uj5Vg3z7",
+    "hash": "64baf86025d29402",
+    "uploaded_at": "2026-06-13T18:07:23.015Z"
   },
   "marketing/campaign-plan": {
-    "skill_id": "skill_01KaeyoWDLfaHTStuqnpqcJV",
-    "hash": "2335b5e87cc366b7",
-    "uploaded_at": "2026-04-29T22:53:19.910Z"
+    "skill_id": "skill_01S9aci3JrWewbSyydQQkYqE",
+    "hash": "3588f54504e639c3",
+    "uploaded_at": "2026-06-13T18:07:23.589Z"
   },
   "marketing/draft-content": {
-    "skill_id": "skill_01QeQJ4wKRMw5n9nYAcjcDuH",
-    "hash": "0387c1d6dece2236",
-    "uploaded_at": "2026-04-29T22:53:21.265Z"
+    "skill_id": "skill_01QD8Qtb6rkoNXcf73dnKzKf",
+    "hash": "d1c86e66ff2f2473",
+    "uploaded_at": "2026-06-13T18:07:24.159Z"
   },
   "design/canvas-design": {
     "skill_id": "skill_01UcqvvnwBti9WYF5BTyopAb",
@@ -228,5 +228,15 @@
     "skill_id": "skill_019xTe1gghJ5Hdc8t5kaVEQX",
     "hash": "38eac49e539e1595",
     "uploaded_at": "2026-04-27T05:37:51.468Z"
+  },
+  "design/frontend-design": {
+    "skill_id": "skill_018YccspWssudyXU6s8nHh1v",
+    "hash": "7f04870dc68328fb",
+    "uploaded_at": "2026-06-13T18:07:21.584Z"
+  },
+  "design/web-artifacts-builder": {
+    "skill_id": "skill_01SobW2XsSeSWJYJaXDEHSec",
+    "hash": "f34551ae410d254f",
+    "uploaded_at": "2026-06-13T18:07:22.357Z"
   }
 }
